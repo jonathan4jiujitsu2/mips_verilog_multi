@@ -1,0 +1,156 @@
+# ------------------------------------------------------------------------------------------------------------------
+#  hfss_extract_and_clone.py
+#  Extracts *everything* useful from the active HFSS design and emits:
+#     1) design_dump.json  – portable snapshot of the design
+#     2) recreate_design.py – runnable script that re-creates the model from design_dump.json
+#  Tested with AEDT 2024-R1 + PyAEDT 0.7.x   (adjust version string if needed)
+# ------------------------------------------------------------------------------------------------------------------
+import json, os, sys, datetime
+from pathlib import Path
+
+# ---------- 1. connect --------------------------------------------------------
+def launch_or_attach():
+    """
+    Prefer attaching to a running AEDT; if none, launch a headless instance.
+    Returns (desktop, project, design, aedt_is_new)
+    """
+    from pyaedt.desktop import Desktop
+    try:
+        d = Desktop(specified_version="2024.1", new_desktop_session=False, close_on_exit=False)
+        is_new = False
+        print("✓ Attached to existing AEDT.")
+    except Exception:
+        d = Desktop(specified_version="2024.1", new_desktop_session=True, close_on_exit=False,
+                    student_version=False, non_graphical=False)   # set non_graphical=True for CI
+        is_new = True
+        print("✓ Launched new AEDT.")
+    prj  = d.active_project
+    des  = d.active_design
+    if not prj or not des:
+        raise RuntimeError("Open a project / design first, then rerun the script.")
+    print(f"   Project : {prj.name}   |   Design : {des.name}")
+    return d, prj, des, is_new
+
+# ---------- 2. variables / materials -----------------------------------------
+def extract_variables(des):
+    return {v: des[v] for v in des._variables}
+
+def extract_materials(prj):
+    return {m.name: {
+                "permittivity": m.permittivity,
+                "permeability": m.permeability,
+                "loss_tangent": m.dloss_tangent
+            } for m in prj.materials.material_keys}
+
+# ---------- 3. geometry -------------------------------------------------------
+def extract_geom(des):
+    ed = des.modeler
+    solids = {}
+    for obj in ed.solid_objects:
+        h = ed.get_history(obj.name)  # raw “CreateBox …” command as a list of strings
+        solids[obj.name] = {
+            "type": obj.type,
+            "material": obj.material_name,
+            "history": h
+        }
+    return solids
+
+# ---------- 4. boundaries & ports --------------------------------------------
+def extract_boundaries(des):
+    bmod = des.boundaries
+    res = {}
+    for b in bmod.boundaries:
+        res[b.name] = {
+            "type": b.type,
+            "props": b.props
+        }
+    return res
+
+# ---------- 5. setups & sweeps -----------------------------------------------
+def extract_setups(des):
+    smod = des.analysis_setups
+    res = {}
+    for s in smod.setups:
+        sweeps = {sw.name: sw.props for sw in s.sweeps}
+        res[s.name] = {"props": s.props, "sweeps": sweeps}
+    return res
+
+# ---------- 6. pack everything & dump ----------------------------------------
+def dump_everything(prj, des, out_json="design_dump.json"):
+    bundle = dict(
+        project_name = prj.name,
+        design_name  = des.name,
+        time_stamp   = datetime.datetime.now().isoformat(),
+        variables    = extract_variables(des),
+        materials    = extract_materials(prj),
+        solids       = extract_geom(des),
+        boundaries   = extract_boundaries(des),
+        setups       = extract_setups(des),
+    )
+    with open(out_json, "w", encoding="utf-8") as f:
+        json.dump(bundle, f, indent=2)
+    print(f"✓ Dumped design to {out_json}")
+    return out_json, bundle
+
+# ---------- 7. generate recreation script ------------------------------------
+RECREATE_STUB = r'''
+"""
+recreate_design.py – auto-generated.
+Reads design_dump.json (same folder) and rebuilds the HFSS model.
+"""
+
+import json, os
+from pyaedt.desktop import Desktop
+d = Desktop(specified_version="2024.1", new_desktop_session=True, close_on_exit=False)
+
+with open("design_dump.json", "r", encoding="utf-8") as f:
+    design = json.load(f)
+
+# -------- create new project / design -------
+new_prj = d.new_project()
+new_prj.save(os.path.join(os.getcwd(), design["project_name"] + "_clone.aedt"))
+hfss   = new_prj.insert_design(design["design_name"] + "_clone", "HFSS")
+
+# -------- variables -------
+for k, v in design["variables"].items():
+    hfss[k] = v
+
+# -------- materials -------
+for mname, mprops in design["materials"].items():
+    if mname not in new_prj.materials.material_keys:
+        new_prj.materials.add_material(mname)
+    mat = new_prj.materials[mname]
+    mat.permittivity  = mprops["permittivity"]
+    mat.permeability  = mprops["permeability"]
+    mat.dloss_tangent = mprops["loss_tangent"]
+
+# -------- geometry -------
+ed = hfss.modeler
+for oname, odict in design["solids"].items():
+    cmd = "\n".join(odict["history"])
+    ed.oeditor.AddUndoStep(cmd)  # replay creation command
+    ed[oname].material_name = odict["material"]
+
+# -------- boundaries -------
+for bname, bdict in design["boundaries"].items():
+    hfss.boundaries.create_boundary_from_dict(bdict)
+
+# -------- setups + sweeps -------
+for sname, sdict in design["setups"].items():
+    setup = hfss.create_setup(setupname=sname, setuptype="HFSSDriven", props=sdict["props"])
+    for swname, swprops in sdict["sweeps"].items():
+        setup.add_sweep(swname, swprops)
+
+print("✓ Recreation complete.  Save & explore the duplicate design.")
+'''
+
+def emit_recreator(filename="recreate_design.py"):
+    Path(filename).write_text(RECREATE_STUB, encoding="utf-8")
+    print(f"✓ Wrote recreation script: {filename}")
+
+# ---------- 8. main ----------------------------------------------------------
+if __name__ == "__main__":
+    desktop, prj, des, _ = launch_or_attach()
+    json_file, _ = dump_everything(prj, des)
+    emit_recreator()
+    print("\nAll done – run `python recreate_design.py` to build a duplicate project.")
