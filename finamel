@@ -1,0 +1,191 @@
+# -*- coding: utf-8 -*-
+"""
+HFSS Property Extractor  –  PyAEDT  (2021R2 → 2024R2)
+Generates  • HFSS_Extract_<project>_<design>_<timestamp>.json
+           • …_variables.csv
+"""
+
+import json, csv, os
+from datetime import datetime
+from typing import Dict, Any, Tuple, List
+from pyaedt import Desktop, Hfss
+
+
+# ────────────────────────────────────────────────────────────────────────── #
+#                              HELPERS                                       #
+# ────────────────────────────────────────────────────────────────────────── #
+def extract_variables(hfss) -> Dict[str, Any]:
+    vm = hfss.variable_manager
+    for attr in ("variables", "properties"):           # PyAEDT 0.6   | 0.7–0.17
+        if hasattr(vm, attr):
+            return getattr(vm, attr)
+    # fallback – build via name lists or raw COM
+    names = []
+    for attr in ("independent_variable_names", "dependent_variable_names"):
+        if hasattr(vm, attr):
+            names.extend(getattr(vm, attr))
+    if not names:
+        try:
+            names = hfss.odesign.GetVariables()
+        except Exception:
+            return {}
+    out = {}
+    for n in names:
+        try:
+            out[n] = vm.get_variable_value(n)
+        except AttributeError:
+            out[n] = hfss.odesign.GetVariableValue(n)
+    return out
+
+
+def extract_materials(hfss) -> Dict[str, Dict]:
+    return {m: {"name": m} for m in hfss.materials.material_keys}
+
+
+def extract_objects(hfss) -> Dict[str, Dict]:
+    mdl = hfss.modeler
+    out = {}
+
+    def names_of(o) -> List[str]:
+        if isinstance(o, str):
+            return [o]
+        if isinstance(o, int):
+            n = mdl.get_object_name(o)
+            return n if isinstance(n, (list, tuple)) else [n]
+        return [o.name]                                   # Object3d
+
+    def mat_of(o, n):
+        if hasattr(o, "material_name"):
+            return o.material_name
+        try:
+            return mdl.get_object_material(n)
+        except Exception:
+            return "Unknown"
+
+    def bbox_of(o, n):
+        if hasattr(o, "bounding_box"):
+            return o.bounding_box
+        try:
+            return mdl.get_bounding_box(n)
+        except Exception:
+            return None
+
+    for o in mdl.objects:
+        for n in names_of(o):
+            try:
+                prim_type   = mdl.get_object_type(n)
+                prim_params = mdl.get_object_parameters(n)
+            except Exception:
+                prim_type, prim_params = "Unknown", {}
+
+            try:
+                face_ids = mdl.get_object_faces(n)      # ← list[int]
+            except Exception:
+                face_ids = []
+
+            bb = bbox_of(o, n)
+            bb_dict = (dict(zip(
+                ["x_min", "y_min", "z_min", "x_max", "y_max", "z_max"], bb))
+                       if bb else {})
+
+            out[n] = {
+                "material":  mat_of(o, n),
+                "color":     getattr(o, "color", None),
+                "primitive": prim_type,
+                "params":    prim_params,
+                "faces":     face_ids,
+                "bounding_box": bb_dict,
+            }
+    return out
+
+
+def extract_bounds_excits(hfss) -> Tuple[Dict, Dict]:
+    bmod = hfss.boundaries
+    bounds, excits = {}, {}
+    for b in bmod:
+        entry = {"type": b.type, "props": b.props}
+        # store face IDs used by this boundary / port
+        try:
+            entry["faces"] = bmod.get_boundary_faces(b.name)
+        except Exception:
+            try:
+                entry["faces"] = bmod.GetFaces(b.name)  # older API
+            except Exception:
+                entry["faces"] = []
+        tgt = excits if "port" in b.type.lower() else bounds
+        tgt[b.name] = entry
+    return bounds, excits
+
+
+def extract_setups(hfss):
+    return {s.name: {"props": s.props,
+                     "sweeps": {sw.name: sw.props for sw in s.sweeps}}
+            for s in hfss.setups}
+
+
+def save_json(data, path):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    print("JSON  →", path)
+
+
+def save_csv(data, prefix):
+    with open(prefix + "_variables.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f); w.writerow(["Variable", "Value"])
+        for k, v in data["variables"].items(): w.writerow([k, v])
+    print("CSV   →", prefix + "_variables.csv")
+
+
+# ───────────────────────────── MAIN ────────────────────────────────────── #
+def main():
+    # ----------- user settings ------------------------------------------ #
+    PROJECT_PATH = None      # r"C:\project.aedt" or None = attach
+    DESIGN_NAME  = None      # "Design1" or None = active
+    AEDT_VERSION = None      # "2024.2" or None
+    EXPORT_CSV   = True
+    # -------------------------------------------------------------------- #
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    d  = Desktop(specified_version=AEDT_VERSION, new_desktop=False)
+
+    # Attach / open project
+    if PROJECT_PATH and os.path.isfile(PROJECT_PATH):
+        prj = d.open_project(PROJECT_PATH)
+    else:
+        prj = d.active_project
+    if not prj:
+        raise RuntimeError("No active project and PROJECT_PATH not set")
+
+    if DESIGN_NAME:
+        hfss = Hfss(projectname=prj.name, designname=DESIGN_NAME,
+                    specified_version=AEDT_VERSION, new_desktop=False,
+                    close_on_exit=False)
+    else:
+        hfss = Hfss(specified_version=AEDT_VERSION, new_desktop=False,
+                    close_on_exit=False)
+
+    print("✓ Project:", hfss.project_name)
+    print("✓ Design :", hfss.design_name)
+
+    data = {
+        "meta": {"timestamp": ts,
+                 "project": hfss.project_name,
+                 "design":  hfss.design_name,
+                 "aedt_version": d.release},
+        "variables":  extract_variables(hfss),
+        "materials":  extract_materials(hfss),
+        "objects":    extract_objects(hfss),
+    }
+    data["boundaries"], data["excitations"] = extract_bounds_excits(hfss)
+    data["analysis_setups"] = extract_setups(hfss)
+
+    base = f"HFSS_Extract_{hfss.project_name}_{hfss.design_name}_{ts}"
+    save_json(data, base + ".json")
+    if EXPORT_CSV:
+        save_csv(data, base)
+
+    hfss.release_desktop(close_projects=False, close_desktop=False)
+    print("✅  Extraction complete.")
+
+
+if __name__ == "__main__":
+    main()
