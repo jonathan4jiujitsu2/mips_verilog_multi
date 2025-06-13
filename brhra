@@ -1,0 +1,30 @@
+# --------------------------------------------------------------------------- #
+# ---------------------------  HELPER FUNCTIONS  ---------------------------- #
+# --------------------------------------------------------------------------- #
+def extract_variables(hfss):
+    """
+    Return a dict  { 'var_name': 'value', … }  that includes both
+    design- and project-level variables.  Works on any PyAEDT version.
+    """
+    vars_out = {}
+
+    # 1) First try the modern PyAEDT API (0.6+)
+    try:
+        for v in hfss.variable_manager.independent_variable_names:
+            vars_out[v] = hfss.variable_manager.get_variable_value(v)
+        for v in hfss.variable_manager.dependent_variable_names:
+            vars_out[v] = hfss.variable_manager.get_variable_value(v)
+        if vars_out:
+            return vars_out
+    except AttributeError:
+        # API too old / changed – fall through to raw COM
+        pass
+
+    # 2) Robust fallback that calls the native AEDT Design object
+    try:
+        for v in hfss.odesign.GetVariables():              # list of names
+            vars_out[v] = hfss.odesign.GetVariableValue(v) # e.g. "3mm"
+    except Exception as e:
+        print("⚠ could not read variables via COM:", e)
+
+    return vars_out
