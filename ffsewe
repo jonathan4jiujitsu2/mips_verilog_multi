@@ -1,0 +1,54 @@
+# --------------------------------------------------------------------------- #
+# ------------------------ 3-D OBJECT EXTRACTOR ----------------------------- #
+# --------------------------------------------------------------------------- #
+def extract_objects(hfss):
+    """
+    Return {'obj_name': {'material': str, 'color': tuple|None, 'bounding_box': …}}
+    Compatible with every PyAEDT version:
+      • hfss.modeler.objects may yield IDs (int), Object3d instances, or strings
+      • mdl.get_object_name(ID) may yield a str or a list of str
+    """
+    mdl = hfss.modeler
+    out = {}
+
+    # --- helpers ----------------------------------------------------------- #
+    def names_of(o):
+        if isinstance(o, str):
+            return [o]
+        if isinstance(o, int):
+            n = mdl.get_object_name(o)       # str  *or*  list
+            return n if isinstance(n, (list, tuple)) else [n]
+        return [o.name]                      # Object3d
+
+    def material_of(o, name):
+        if hasattr(o, "material_name"):
+            return o.material_name
+        try:
+            return mdl.get_object_material(name)
+        except Exception:
+            return "Unknown"
+
+    def bbox_of(o, name):
+        if hasattr(o, "bounding_box"):
+            return o.bounding_box
+        try:
+            return mdl.get_bounding_box(name)  # [xmin … zmax]  or  None
+        except Exception:
+            return None
+    # ---------------------------------------------------------------------- #
+
+    for o in mdl.objects:
+        for name in names_of(o):
+            bb = bbox_of(o, name)
+            bbox_dict = (
+                dict(zip(
+                    ["x_min", "y_min", "z_min", "x_max", "y_max", "z_max"], bb))
+                if bb else {}
+            )
+            out[name] = {
+                "material": material_of(o, name),
+                "color": getattr(o, "color", None),
+                "bounding_box": bbox_dict,
+            }
+
+    return out
