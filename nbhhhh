@@ -1,0 +1,60 @@
+# --------------------------------------------------------------------------- #
+# -------------  UNIVERSAL 3-D OBJECT EXTRACTOR  (IDs *or* objects) --------- #
+# --------------------------------------------------------------------------- #
+def extract_objects(hfss):
+    """
+    Return {
+        'obj_name': {
+            'material': str,
+            'color'   : tuple | None,
+            'bounding_box': {'x_min':…, 'y_min':…, …}
+        }, …
+    }
+    Compatible with all PyAEDT versions (objects list can be names, IDs or
+    Object3d instances).
+    """
+    mdl = hfss.modeler
+    objects_out = {}
+
+    # Helper lambdas that adapt to the type we get back
+    def obj_name(o):
+        if isinstance(o, str):
+            return o
+        if isinstance(o, int):                 # numeric ID
+            return mdl.get_object_name(o)
+        # Object3d instance
+        return o.name
+
+    def obj_mat(o, name):
+        if hasattr(o, "material_name"):
+            return o.material_name
+        try:
+            return mdl.get_object_material(name)
+        except Exception:
+            return "Unknown"
+
+    def obj_bbox(o, name):
+        if hasattr(o, "bounding_box"):
+            return o.bounding_box
+        try:
+            return mdl.get_bounding_box(name)         # returns [xmin … zmax]
+        except Exception:
+            return None
+
+    # Iterate over whatever list type the API gives us
+    for o in mdl.objects:
+        name = obj_name(o)
+        bb   = obj_bbox(o, name)
+        if bb:
+            bbox_dict = dict(zip(
+                ["x_min", "y_min", "z_min", "x_max", "y_max", "z_max"], bb))
+        else:
+            bbox_dict = {}
+
+        objects_out[name] = {
+            "material"    : obj_mat(o, name),
+            "color"       : getattr(o, "color", None),
+            "bounding_box": bbox_dict,
+        }
+
+    return objects_out
