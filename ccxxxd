@@ -1,0 +1,19 @@
+    # Iterate over whatever list type the API gives us
+    for o in mdl.objects:
+        names = obj_name(o)                       # ← can be str **or list**
+        if isinstance(names, (list, tuple)):      # ⇽ NORMALISE: 1‒many names
+            name_list = names
+        else:
+            name_list = [names]
+
+        for name in name_list:                    # loop over each real name
+            bb = obj_bbox(o, name)
+            bbox_dict = dict(zip(
+                ["x_min", "y_min", "z_min", "x_max", "y_max", "z_max"],
+                bb)) if bb else {}
+
+            objects_out[name] = {
+                "material"    : obj_mat(o, name),
+                "color"       : getattr(o, "color", None),
+                "bounding_box": bbox_dict,
+            }
