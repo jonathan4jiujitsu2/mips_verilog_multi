@@ -1,0 +1,65 @@
+def extract_objects(hfss) -> Dict[str, Dict]:
+    """
+    Adds two extra keys in the output:
+        • 'primitive'  : 'Box', 'Cylinder', 'Polyhedron', …
+        • 'params'     : {param_name: value, …}  (e.g. XSize, YSize, ZSize)
+    Everything else (material, colour, bounding-box) stays the same.
+    """
+    mdl = hfss.modeler
+    out = {}
+
+    # ---------- helpers ---------------------------------------------------- #
+    def names_of(o):
+        if isinstance(o, str):
+            return [o]
+        if isinstance(o, int):
+            n = mdl.get_object_name(o)
+            return n if isinstance(n, (list, tuple)) else [n]
+        return [o.name]
+
+    def material_of(o, name):
+        if hasattr(o, "material_name"):
+            return o.material_name
+        try:
+            return mdl.get_object_material(name)
+        except Exception:
+            return "Unknown"
+
+    def bbox_of(o, name):
+        if hasattr(o, "bounding_box"):
+            return o.bounding_box
+        try:
+            return mdl.get_bounding_box(name)
+        except Exception:
+            return None
+    # ---------------------------------------------------------------------- #
+
+    for o in mdl.objects:
+        for name in names_of(o):
+            # ── NEW LINES — primitive type + parameter dict ────────────────
+            try:
+                prim_type = mdl.get_object_type(name)            # 'Box', ...
+            except Exception:
+                prim_type = "Unknown"
+            try:
+                prim_params = mdl.get_object_parameters(name)    # {'XSize': ...}
+            except Exception:
+                prim_params = {}
+            # ───────────────────────────────────────────────────────────────
+
+            bb = bbox_of(o, name)
+            bbox_dict = (
+                dict(zip(
+                    ["x_min", "y_min", "z_min", "x_max", "y_max", "z_max"], bb))
+                if bb else {}
+            )
+
+            out[name] = {
+                "material"   : material_of(o, name),
+                "color"      : getattr(o, "color", None),
+                "primitive"  : prim_type,     #  ←  new field
+                "params"     : prim_params,   #  ←  new field
+                "bounding_box": bbox_dict,
+            }
+
+    return out
