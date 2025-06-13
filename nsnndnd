@@ -1,0 +1,58 @@
+# --------------------------------------------------------------------------- #
+# -------------  UNIVERSAL 3-D OBJECT EXTRACTOR  ---------------------------- #
+# --------------------------------------------------------------------------- #
+def extract_objects(hfss):
+    """
+    Return
+        { 'obj_name': {
+              'material': str,
+              'color'   : tuple | None,
+              'bounding_box': {'x_min': …, 'y_min': …, 'z_min': …,
+                               'x_max': …, 'y_max': …, 'z_max': …}
+          }, … }
+    Works across all PyAEDT versions where the modeler’s .objects list
+    may yield IDs, Object3d instances, or plain names.
+    """
+    mdl = hfss.modeler
+    objects_out = {}
+
+    # ---------- helpers that adapt to whatever type we get back ---------- #
+    def get_names(o):
+        if isinstance(o, str):
+            return [o]                       # single name
+        if isinstance(o, int):
+            return mdl.get_object_name(o)    # can be str *or* list
+        return [o.name]                      # Object3d → single-element list
+
+    def get_material(o, name):
+        if hasattr(o, "material_name"):
+            return o.material_name
+        try:
+            return mdl.get_object_material(name)
+        except Exception:
+            return "Unknown"
+
+    def get_bbox(o, name):
+        if hasattr(o, "bounding_box"):
+            return o.bounding_box            # [xmin … zmax]
+        try:
+            return mdl.get_bounding_box(name)
+        except Exception:
+            return None
+    # --------------------------------------------------------------------- #
+
+    for o in mdl.objects:
+        for name in get_names(o):            # ← always iterates over str names
+            bb = get_bbox(o, name)
+            bbox_dict = (
+                dict(zip(
+                    ["x_min", "y_min", "z_min", "x_max", "y_max", "z_max"], bb))
+                if bb else {}
+            )
+            objects_out[name] = {
+                "material": get_material(o, name),
+                "color": getattr(o, "color", None),
+                "bounding_box": bbox_dict,
+            }
+
+    return objects_out
