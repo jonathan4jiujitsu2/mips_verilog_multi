@@ -1,0 +1,47 @@
+% connect (or attach) to AEDT
+eDesktop = actxserver('Ansoft.ElectronicsDesktop');
+
+% ▸ if GetDesktop exists, use it; otherwise eDesktop *is* the desktop
+if ismethod(eDesktop, 'GetDesktop')
+    oDesktop = eDesktop.GetDesktop;
+else
+    oDesktop = eDesktop;         % fallback
+end
+
+oProject = oDesktop.GetActiveProject();
+if isempty(oProject)
+    error('No active project – open one in HFSS first.');
+end
+oDesign  = oProject.GetActiveDesign();
+if isempty(oDesign)
+    error('No active design – click on a design in HFSS.');
+end
+
+% ---- robust history grab ------------------------------------
+try                       % newest API
+    historyTxt = oDesign.GetModelHistory();
+    fprintf('✓ GetModelHistory succeeded\n');
+catch
+    try                   % editor API (always exists unless blocked)
+        oEditor = oDesign.SetActiveEditor('3D Modeler');
+        historyTxt = oEditor.GetHistory();
+        fprintf('✓ oEditor.GetHistory succeeded\n');
+    catch
+        % stitch every operation one-by-one
+        fprintf('↻ stitching history from individual operations…\n');
+        oEditor = oDesign.SetActiveEditor('3D Modeler');
+        opNames = oEditor.GetOperationNames();
+        historyTxt = '';
+        for k = 1:numel(opNames)
+            historyTxt = [historyTxt newline ...
+                          char(oEditor.GetScriptForOp(opNames{k}))];
+        end
+    end
+end
+
+% ---- write file ----------------------------------------------
+outFile = fullfile(getenv('USERPROFILE'), 'Documents', ...
+          ['FilterHistory_' datestr(now,'yyyymmdd_HHMMSS') '.txt']);
+fid = fopen(outFile, 'w');  fprintf(fid, '%s', historyTxt);  fclose(fid);
+
+fprintf('✓ full build history written to:\n   %s\n', outFile);
