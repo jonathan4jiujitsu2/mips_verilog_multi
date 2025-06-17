@@ -1,0 +1,288 @@
+Perfect! Now I can see the issue. From your screenshots:
+
+1. We found box objects (like “L02_2_7_0_Top”)
+1. We can see properties like Material, Color, etc. in Geometry3DAttributeTab
+1. But we’re NOT finding XSize, YSize, ZSize properties
+1. The “Geometry3DParametricTab” doesn’t exist (invalid tab name error)
+
+Let me provide scripts that use different approaches to find these dimension properties:
+
+## Alternative Approaches to Find Dimensions
+
+### 1. **Try ALL Possible Tab Names**
+
+```python
+import ScriptEnv
+ScriptEnv.Initialize("Ansoft.ElectronicsDesktop")
+oDesktop.RestoreWindow()
+oProject = oDesktop.GetActiveProject()
+oDesign = oProject.GetActiveDesign()
+oEditor = oDesign.SetActiveEditor("3D Modeler")
+
+def try_all_possible_tabs():
+    """Try every conceivable tab name"""
+    
+    # Get a box object
+    all_objects = oEditor.GetMatchedObjectName("*")
+    box_obj = None
+    for obj in all_objects:
+        if "L02_2_7_0_Top" in obj:  # Use the specific object from your screenshot
+            box_obj = obj
+            break
+    
+    if not box_obj:
+        print("Box object not found")
+        return
+    
+    print("Testing object: " + box_obj)
+    
+    # List of all possible tab names to try
+    possible_tabs = [
+        "Geometry3DAttributeTab",
+        "Geometry3DCmdTab",
+        "Geometry3DBoxTab",
+        "Geometry3DSizeTab",
+        "Geometry3DDimensionTab",
+        "GeometryTab",
+        "ParametersTab",
+        "PropertiesTab",
+        "DimensionsTab",
+        "SizeTab",
+        "BoxTab",
+        "ObjectTab",
+        "ModelTab",
+        "3DModelTab",
+        "Geometry3DTab",
+        "CmdTab",
+        "AttributeTab"
+    ]
+    
+    for tab in possible_tabs:
+        try:
+            props = oEditor.GetProperties(tab, box_obj)
+            if props:
+                print("\n[" + tab + "] - VALID TAB!")
+                print("Properties: " + str(list(props)))
+                
+                # Check for size properties
+                for prop in props:
+                    if any(x in prop.lower() for x in ["size", "dim", "width", "length", "height", "x", "y", "z"]):
+                        try:
+                            val = oEditor.GetPropertyValue(tab, box_obj, prop)
+                            print("  >>> " + prop + " = " + str(val))
+                        except:
+                            pass
+        except:
+            pass
+
+# Try all tabs
+try_all_possible_tabs()
+```
+
+### 2. **Use GetMatchedObjectName with Filters**
+
+```python
+def get_object_info_alternative():
+    """Try alternative methods to get object information"""
+    
+    # Get a specific box object
+    box_obj = "L02_2_7_0_Top"  # From your screenshot
+    
+    print("Analyzing: " + box_obj)
+    
+    # Try to get object ID and use that
+    try:
+        obj_id = oEditor.GetObjectIDByName(box_obj)
+        print("Object ID: " + str(obj_id))
+    except:
+        pass
+    
+    # Try to get facet IDs (might give us dimension info)
+    try:
+        facets = oEditor.GetFaceIDs(box_obj)
+        print("Face IDs: " + str(facets))
+    except:
+        pass
+    
+    # Try to get edges
+    try:
+        edges = oEditor.GetEdgeIDsFromObject(box_obj)
+        print("Edge IDs: " + str(edges))
+    except:
+        pass
+    
+    # Try to get bounding box (this might give us dimensions!)
+    try:
+        # This might work
+        bbox = oEditor.GetModelBoundingBox()
+        print("Model bounding box: " + str(bbox))
+    except:
+        pass
+    
+    # Try object-specific bounding box
+    try:
+        # Select the object first
+        oEditor.SelectByName(box_obj)
+        bbox = oEditor.GetSelectionBoundingBox()
+        print("Selection bounding box: " + str(bbox))
+    except:
+        pass
+
+# Try alternative methods
+get_object_info_alternative()
+```
+
+### 3. **Extract Dimensions from Bounding Box**
+
+```python
+def extract_dimensions_from_bbox():
+    """Extract dimensions using bounding box approach"""
+    
+    all_objects = oEditor.GetMatchedObjectName("*")
+    
+    output_file = "C:/temp/dimensions_from_bbox.txt"
+    
+    with open(output_file, "w") as f:
+        f.write("OBJECT DIMENSIONS FROM BOUNDING BOX\n")
+        f.write("===================================\n\n")
+        
+        for obj_name in all_objects[:10]:  # First 10 objects
+            try:
+                # Select the object
+                oEditor.SelectByName(obj_name)
+                
+                # Get bounding box
+                # Format might be: [xmin, ymin, zmin, xmax, ymax, zmax]
+                bbox = oEditor.GetSelectionBoundingBox()
+                
+                if bbox and len(bbox) >= 6:
+                    xsize = float(bbox[3]) - float(bbox[0])
+                    ysize = float(bbox[4]) - float(bbox[1])
+                    zsize = float(bbox[5]) - float(bbox[2])
+                    
+                    f.write("Object: " + obj_name + "\n")
+                    f.write("  Bounding Box: " + str(bbox) + "\n")
+                    f.write("  Calculated XSize: " + str(xsize) + "\n")
+                    f.write("  Calculated YSize: " + str(ysize) + "\n")
+                    f.write("  Calculated ZSize: " + str(zsize) + "\n\n")
+                
+                # Clear selection
+                oEditor.ClearAllSelections()
+                
+            except Exception as e:
+                f.write("Error with " + obj_name + ": " + str(e) + "\n\n")
+    
+    print("Dimensions saved to: " + output_file)
+
+# Extract dimensions via bounding box
+extract_dimensions_from_bbox()
+```
+
+### 4. **Use HFSS Recording Feature**
+
+```python
+def use_hfss_recording():
+    """Instructions for using HFSS's built-in recording"""
+    
+    print("\n" + "="*60)
+    print("MANUAL RECORDING METHOD")
+    print("="*60)
+    print("\nSince we can't find dimension properties programmatically,")
+    print("use HFSS's built-in recording feature:\n")
+    print("1. In HFSS, go to: Tools > Record Script")
+    print("2. Choose 'Python' as the language")
+    print("3. Start recording")
+    print("4. Right-click on a box object (like L02_2_7_0_Top)")
+    print("5. Select 'Properties'")
+    print("6. Click 'OK' (don't change anything)")
+    print("7. Stop recording")
+    print("8. Open the recorded script - it will show the exact commands")
+    print("\nOR:\n")
+    print("1. Select a box object")
+    print("2. Go to: Edit > Duplicate > Along Line")
+    print("3. In the dialog, you'll see all the object's properties")
+    print("4. Cancel the operation")
+    print("5. But the recording will capture how to access those properties")
+
+use_hfss_recording()
+```
+
+### 5. **Create Objects with Known Dimensions**
+
+```python
+def create_objects_with_dimensions():
+    """Since we can see the properties in the dialog, let's create objects manually"""
+    
+    # Based on what you showed in the properties dialog:
+    # L09_L09_2929: Position=(404.392, -977), XSize=183.8mil, YSize=174mil, ZSize=240mil
+    
+    script_lines = []
+    script_lines.append("# Manual recreation based on visible properties")
+    script_lines.append("")
+    
+    # Example for the box you showed
+    script_lines.append("# L09_L09_2929")
+    script_lines.append("oEditor.CreateBox([")
+    script_lines.append("    \"NAME:BoxParameters\",")
+    script_lines.append("    \"XPosition:=\", \"404.392mil\",")
+    script_lines.append("    \"YPosition:=\", \"-977mil\",")
+    script_lines.append("    \"ZPosition:=\", \"0mil\",")
+    script_lines.append("    \"XSize:=\", \"183.8mil\",")
+    script_lines.append("    \"YSize:=\", \"174mil\",")
+    script_lines.append("    \"ZSize:=\", \"240mil\"")
+    script_lines.append("], [")
+    script_lines.append("    \"NAME:Attributes\",")
+    script_lines.append("    \"Name:=\", \"L09_L09_2929\",")
+    script_lines.append("    \"MaterialValue:=\", \"\\\"vacuum\\\"\"")
+    script_lines.append("])")
+    
+    # Save
+    with open("C:/temp/manual_creation.py", "w") as f:
+        f.write("\n".join(script_lines))
+    
+    print("Manual creation script saved to: C:/temp/manual_creation.py")
+    print("\nYou'll need to manually add dimensions for each object")
+    print("by looking at the Properties dialog in HFSS")
+
+create_objects_with_dimensions()
+```
+
+### 6. **Final Workaround - Export and Parse**
+
+```python
+def export_and_parse():
+    """Try to export the design in a format we can parse"""
+    
+    try:
+        # Try to export as SAT file (might contain dimensions)
+        oEditor.Export("SAT", "C:/temp/model.sat")
+        print("Exported to SAT format: C:/temp/model.sat")
+    except:
+        pass
+    
+    try:
+        # Try to export as STEP file
+        oEditor.Export("STEP", "C:/temp/model.step")
+        print("Exported to STEP format: C:/temp/model.step")
+    except:
+        pass
+    
+    try:
+        # Try script export
+        oProject.ExportDesignFile("C:/temp/design.aedt")
+        print("Exported design file: C:/temp/design.aedt")
+    except:
+        pass
+    
+    print("\nCheck these exported files - they might contain dimension data")
+
+export_and_parse()
+```
+
+The issue is that HFSS’s Python API might not expose box dimensions through the standard property interface. Your best options are:
+
+1. **Use the bounding box method** (#3) to calculate dimensions
+1. **Use HFSS’s recording feature** (#4) to capture the actual commands
+1. **Manually transcribe dimensions** from the Properties dialog (#5)
+
+Try the bounding box method first - it’s most likely to work programmatically.​​​​​​​​​​​​​​​​
