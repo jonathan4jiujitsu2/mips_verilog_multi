@@ -1,0 +1,23 @@
+# 1) ensure you have an active project/design
+if oProject is None or oDesign is None:
+    raise Exception("Open a project and select a design first!")
+
+# 2) pick a new name that doesn’t collide
+base = oDesign.GetName()
+copy = base + "_Copy"
+i = 1
+while copy in list(oProject.GetDesignNames()):
+    i += 1
+    copy = "{}_Copy{}".format(base, i)
+
+# 3) duplicate the design
+oProject.DuplicateDesign(base, copy)
+print("✓ duplicated as", copy)
+
+# 4) (optional) save the whole project under a new file
+import os, datetime
+root, ext = os.path.splitext(oProject.GetPath())
+stamp     = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+clone_aedt = "{}_clone_{}{}".format(root, stamp, ext)
+oProject.SaveAs(clone_aedt)
+print("✓ project saved to", clone_aedt)
