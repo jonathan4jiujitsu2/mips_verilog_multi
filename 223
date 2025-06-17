@@ -1,0 +1,329 @@
+I see the issue - we’re trying to access properties that don’t exist with those exact names. Let’s create a script that discovers the ACTUAL property names without making any assumptions:
+
+## Script to Discover Actual Property Names
+
+### 1. **Property Discovery Without Assumptions**
+
+```python
+import ScriptEnv
+ScriptEnv.Initialize("Ansoft.ElectronicsDesktop")
+oDesktop.RestoreWindow()
+oProject = oDesktop.GetActiveProject()
+oDesign = oProject.GetActiveDesign()
+oEditor = oDesign.SetActiveEditor("3D Modeler")
+
+def discover_all_properties_no_assumptions():
+    """Discover properties without assuming any names"""
+    
+    all_objects = oEditor.GetMatchedObjectName("*")
+    print("Total objects: " + str(len(all_objects)))
+    
+    # Dictionary to store property patterns
+    property_patterns = {}
+    
+    # Check first 5 objects
+    for i, obj_name in enumerate(all_objects[:5]):
+        print("\n" + "="*60)
+        print("Object " + str(i) + ": " + obj_name)
+        print("="*60)
+        
+        # Try all tabs
+        tabs = [
+            "Geometry3DAttributeTab",
+            "Geometry3DCmdTab",
+            "Geometry3DParametricTab",
+            "BaseElementTab"
+        ]
+        
+        obj_properties = {}
+        
+        for tab in tabs:
+            try:
+                # Get ALL properties for this tab
+                props = oEditor.GetProperties(tab, obj_name)
+                
+                if props:
+                    print("\n[" + tab + "]")
+                    obj_properties[tab] = []
+                    
+                    # List ALL properties found
+                    for prop in props:
+                        obj_properties[tab].append(prop)
+                        
+                        # Try to read the value
+                        try:
+                            value = oEditor.GetPropertyValue(tab, obj_name, prop)
+                            print("  " + prop + " = " + str(value))
+                            
+                            # Store property pattern
+                            if prop not in property_patterns:
+                                property_patterns[prop] = []
+                            property_patterns[prop].append(obj_name)
+                            
+                        except Exception as e:
+                            print("  " + prop + " = ERROR: " + str(e))
+            except:
+                pass
+        
+        # Store what we found
+        if not obj_properties:
+            print("  NO PROPERTIES ACCESSIBLE!")
+    
+    # Summary of all unique properties found
+    print("\n" + "="*60)
+    print("SUMMARY - All unique properties found:")
+    print("="*60)
+    for prop, objects in property_patterns.items():
+        print(prop + " (found in " + str(len(objects)) + " objects)")
+
+# Run discovery
+discover_all_properties_no_assumptions()
+```
+
+### 2. **Safe Extraction Based on What Actually Exists**
+
+```python
+def safe_extract_model():
+    """Extract model using only properties that actually exist"""
+    
+    output_file = "C:/temp/safe_model_extract.py"
+    data_file = "C:/temp/safe_model_data.txt"
+    
+    # Get all objects
+    all_objects = oEditor.GetMatchedObjectName("*")
+    
+    # Start script
+    script_lines = []
+    script_lines.append("# HFSS Model - Safe Extraction")
+    script_lines.append("import ScriptEnv")
+    script_lines.append("ScriptEnv.Initialize('Ansoft.ElectronicsDesktop')")
+    script_lines.append("oDesktop.RestoreWindow()")
+    script_lines.append("oProject = oDesktop.GetActiveProject()")
+    script_lines.append("oDesign = oProject.GetActiveDesign()")
+    script_lines.append("oEditor = oDesign.SetActiveEditor('3D Modeler')")
+    script_lines.append("")
+    
+    # Data collection
+    with open(data_file, "w") as df:
+        df.write("MODEL DATA\n")
+        df.write("==========\n\n")
+        
+        for obj_name in all_objects:
+            df.write("\nOBJECT: " + obj_name + "\n")
+            
+            # Collect ALL properties we can find
+            all_props = {}
+            
+            tabs = ["Geometry3DAttributeTab", "Geometry3DCmdTab", "Geometry3DParametricTab"]
+            
+            for tab in tabs:
+                try:
+                    props = oEditor.GetProperties(tab, obj_name)
+                    if props:
+                        for prop in props:
+                            try:
+                                value = oEditor.GetPropertyValue(tab, obj_name, prop)
+                                all_props[prop] = value
+                                df.write("  " + prop + " = " + str(value) + "\n")
+                            except:
+                                pass
+                except:
+                    pass
+            
+            # Determine object type based on properties found
+            obj_type = "Unknown"
+            
+            # Check for cylinder indicators
+            if "Radius" in all_props:
+                obj_type = "Cylinder"
+            # Check for polyline indicators  
+            elif any(p in all_props for p in ["Segment Type", "Point1", "Points"]):
+                obj_type = "Polyline"
+            # Check for box indicators (we'll find the actual property names)
+            elif "Material" in all_props and obj_type == "Unknown":
+                # Might be a box - check name
+                if any(x in obj_name for x in ["Box", "2929", "L0"]):
+                    obj_type = "Box"
+            
+            df.write("  Type: " + obj_type + "\n")
+            
+            # Generate creation command based on what we found
+            if obj_type == "Cylinder" and "Radius" in all_props:
+                script_lines.append("\n# Cylinder: " + obj_name)
+                script_lines.extend(create_cylinder_from_props(obj_name, all_props))
+            elif obj_type == "Box":
+                script_lines.append("\n# Box: " + obj_name)
+                script_lines.append("# TODO: Need to find box dimension properties")
+                script_lines.append("# Properties found: " + str(list(all_props.keys())))
+            else:
+                script_lines.append("\n# Unknown object: " + obj_name)
+                script_lines.append("# Properties: " + str(list(all_props.keys())))
+    
+    # Save script
+    with open(output_file, "w") as f:
+        f.write("\n".join(script_lines))
+    
+    print("Files saved:")
+    print("  Script: " + output_file)
+    print("  Data: " + data_file)
+
+def create_cylinder_from_props(obj_name, props):
+    """Create cylinder using actual found properties"""
+    
+    lines = []
+    
+    # Get values with defaults
+    radius = props.get("Radius", "0mm")
+    height = props.get("Height", "0mm")
+    
+    # Handle center position - might be under different names
+    center = props.get("Center Position", props.get("Position", "0, 0, 0"))
+    
+    # Parse center
+    pos_parts = [p.strip() for p in center.split(",")]
+    xcenter = pos_parts[0] if len(pos_parts) > 0 else "0"
+    ycenter = pos_parts[1] if len(pos_parts) > 1 else "0"
+    zcenter = pos_parts[2] if len(pos_parts) > 2 else "0"
+    
+    lines.append("oEditor.CreateCylinder([")
+    lines.append("    \"NAME:CylinderParameters\",")
+    lines.append("    \"XCenter:=\", \"" + xcenter + "\",")
+    lines.append("    \"YCenter:=\", \"" + ycenter + "\",")
+    lines.append("    \"ZCenter:=\", \"" + zcenter + "\",")
+    lines.append("    \"Radius:=\", \"" + radius + "\",")
+    lines.append("    \"Height:=\", \"" + height + "\",")
+    lines.append("    \"WhichAxis:=\", \"Z\"")
+    lines.append("], [")
+    lines.append("    \"NAME:Attributes\",")
+    lines.append("    \"Name:=\", \"" + obj_name + "\"")
+    lines.append("])")
+    
+    return lines
+
+# Run safe extraction
+safe_extract_model()
+```
+
+### 3. **Find Box Properties Specifically**
+
+```python
+def find_box_properties_specifically():
+    """Focus on finding box dimension properties"""
+    
+    all_objects = oEditor.GetMatchedObjectName("*")
+    
+    # Find objects that are likely boxes
+    box_objects = []
+    for obj in all_objects:
+        if any(x in obj for x in ["Box", "2929", "L09", "L02"]):
+            box_objects.append(obj)
+    
+    if box_objects:
+        print("\nLikely box objects found: " + str(len(box_objects)))
+        print("Checking first box: " + box_objects[0])
+        
+        # Try EVERY possible property
+        test_obj = box_objects[0]
+        
+        # Get ALL properties
+        all_tabs = [
+            "Geometry3DAttributeTab",
+            "Geometry3DCmdTab", 
+            "Geometry3DParametricTab",
+            "BaseElementTab",
+            "Geometry3DCSTab"
+        ]
+        
+        print("\nSearching for dimension properties...")
+        
+        for tab in all_tabs:
+            try:
+                props = oEditor.GetProperties(tab, test_obj)
+                if props:
+                    print("\n[" + tab + "] Properties:")
+                    print(str(list(props)))
+                    
+                    # Look for anything with size/dimension keywords
+                    for prop in props:
+                        prop_lower = prop.lower()
+                        if any(x in prop_lower for x in ["size", "dim", "width", "length", "height", "x", "y", "z"]):
+                            try:
+                                val = oEditor.GetPropertyValue(tab, test_obj, prop)
+                                print("  >>> DIMENSION PROPERTY: " + prop + " = " + str(val))
+                            except:
+                                pass
+            except:
+                pass
+    else:
+        print("No box objects found")
+
+# Find box properties
+find_box_properties_specifically()
+```
+
+### 4. **Alternative: Export/Import Approach**
+
+If we can’t find the properties, here’s an alternative approach:
+
+```python
+def export_then_analyze():
+    """Export the design and analyze the file"""
+    
+    try:
+        # Export to a temporary file
+        export_file = "C:/temp/model_export.hfssscript"
+        
+        # This might work to export a script
+        oDesign.ExportScript(export_file)
+        
+        print("Design exported to: " + export_file)
+        print("Open this file in a text editor to see the commands")
+        
+    except Exception as e:
+        print("Export failed: " + str(e))
+        
+        # Try alternative export
+        try:
+            # Export as Python script
+            oEditor.ExportModelImageToFile("C:/temp/model_image.png", 800, 600)
+            print("At least exported an image to: C:/temp/model_image.png")
+        except:
+            pass
+
+# Try export
+export_then_analyze()
+```
+
+### 5. **Manual Recording Approach**
+
+```python
+def start_manual_recording():
+    """Instructions for manual recording"""
+    
+    print("\n" + "="*60)
+    print("MANUAL RECORDING APPROACH")
+    print("="*60)
+    print("\nSince property extraction is difficult, try this:")
+    print("1. In HFSS, go to Tools > Record Script to File")
+    print("2. Start recording to 'C:/temp/manual_record.py'")
+    print("3. Right-click on each object and select 'Edit > Duplicate > Along Line'")
+    print("4. Cancel the duplicate operation")
+    print("5. This will record the object's properties in the script")
+    print("6. Stop recording")
+    print("7. Open the recorded script to see the exact property names and values")
+    print("\nAlternatively:")
+    print("1. Select an object")
+    print("2. Go to Edit > Copy")
+    print("3. Go to Edit > Paste Special > Paste as Script")
+    print("4. This gives you the creation command")
+
+start_manual_recording()
+```
+
+Run these scripts in order:
+
+1. **`discover_all_properties_no_assumptions()`** - This will show you EXACTLY what properties exist
+1. **`find_box_properties_specifically()`** - Focus on finding box dimensions
+1. **`safe_extract_model()`** - Extract using only properties that exist
+
+The key is that HFSS might use different property names than we expect (like “Segment Type” with a space instead of “SegmentType”).​​​​​​​​​​​​​​​​
