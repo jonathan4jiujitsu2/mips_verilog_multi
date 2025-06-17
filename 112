@@ -1,0 +1,314 @@
+I see the issue now! Looking at your screenshots:
+
+1. For **Cylinders**: The properties are `Center Position`, `Radius`, `Height` (NOT XSize/YSize/ZSize)
+1. For **Boxes**: We need to find where XSize/YSize/ZSize are stored - they might be in a different tab
+
+Here’s the corrected script that handles the actual property names:
+
+## Corrected Script with Proper Property Names
+
+### 1. **First, Let’s Find Where Box Size Properties Are**
+
+```python
+import ScriptEnv
+ScriptEnv.Initialize("Ansoft.ElectronicsDesktop")
+oDesktop.RestoreWindow()
+oProject = oDesktop.GetActiveProject()
+oDesign = oProject.GetActiveDesign()
+oEditor = oDesign.SetActiveEditor("3D Modeler")
+
+def find_box_properties():
+    """Find where box size properties are stored"""
+    
+    all_objects = oEditor.GetMatchedObjectName("*")
+    
+    # Find a box object
+    for obj_name in all_objects:
+        try:
+            command = oEditor.GetPropertyValue("Geometry3DAttributeTab", obj_name, "Command")
+            if command == "CreateBox":
+                print("\nFound Box: " + obj_name)
+                print("Searching for size properties...")
+                
+                # Try ALL possible tabs
+                all_tabs = [
+                    "Geometry3DCmdTab",
+                    "Geometry3DAttributeTab",
+                    "Geometry3DParametricTab",
+                    "BaseElementTab",
+                    "Geometry3DPolylineTab",
+                    "Geometry3DCSTab"
+                ]
+                
+                for tab in all_tabs:
+                    try:
+                        props = oEditor.GetProperties(tab, obj_name)
+                        if props and len(props) > 0:
+                            print("\n[" + tab + "] has " + str(len(props)) + " properties:")
+                            
+                            # Look for any property with Size, Position, Dim
+                            for prop in props:
+                                if any(x in prop for x in ["Size", "Position", "Dim", "Width", "Length", "Height"]):
+                                    try:
+                                        val = oEditor.GetPropertyValue(tab, obj_name, prop)
+                                        print("  >>> " + prop + " = " + str(val))
+                                    except:
+                                        print("  >>> " + prop + " = <error reading>")
+                    except:
+                        pass
+                
+                break  # Just check one box
+        except:
+            pass
+
+# Run this first
+find_box_properties()
+```
+
+### 2. **Complete Working Extraction with Correct Property Names**
+
+```python
+def extract_model_correct_properties():
+    """Extract model using the ACTUAL property names"""
+    
+    output_file = "C:/temp/filter_model_correct.py"
+    
+    script_lines = []
+    script_lines.append("# HFSS Model Recreation - Correct Properties")
+    script_lines.append("import ScriptEnv")
+    script_lines.append("ScriptEnv.Initialize('Ansoft.ElectronicsDesktop')")
+    script_lines.append("oDesktop.RestoreWindow()")
+    script_lines.append("oProject = oDesktop.GetActiveProject()")
+    script_lines.append("oDesign = oProject.GetActiveDesign()")
+    script_lines.append("oEditor = oDesign.SetActiveEditor('3D Modeler')")
+    script_lines.append("")
+    
+    # Add variables first
+    script_lines.extend(extract_all_variables())
+    
+    # Get all objects
+    all_objects = oEditor.GetMatchedObjectName("*")
+    
+    script_lines.append("\n# ========== OBJECT CREATION ==========")
+    
+    for obj_name in all_objects:
+        try:
+            # Get object type from Command property
+            command = oEditor.GetPropertyValue("Geometry3DAttributeTab", obj_name, "Command")
+            
+            if command == "CreateBox":
+                script_lines.extend(create_box_correct(obj_name))
+            elif command == "CreateCylinder":
+                script_lines.extend(create_cylinder_correct(obj_name))
+            elif command == "CreatePolyline":
+                script_lines.extend(create_polyline_correct(obj_name))
+            else:
+                script_lines.append("\n# Unknown command: " + command + " for " + obj_name)
+                
+        except Exception as e:
+            script_lines.append("\n# Error with " + obj_name + ": " + str(e))
+    
+    # Save script
+    with open(output_file, "w") as f:
+        f.write("\n".join(script_lines))
+    
+    print("Script saved to: " + output_file)
+
+def create_cylinder_correct(obj_name):
+    """Create cylinder with CORRECT property names"""
+    
+    lines = []
+    lines.append("\n# --- Create Cylinder: " + obj_name + " ---")
+    
+    try:
+        # Get CENTER POSITION (not just Position)
+        center_pos = oEditor.GetPropertyValue("Geometry3DCmdTab", obj_name, "Center Position")
+        # Parse center position
+        pos_parts = center_pos.split(",")
+        xcenter = pos_parts[0].strip() if len(pos_parts) > 0 else "0mm"
+        ycenter = pos_parts[1].strip() if len(pos_parts) > 1 else "0mm"
+        zcenter = pos_parts[2].strip() if len(pos_parts) > 2 else "0mm"
+        
+        # Get other cylinder properties
+        radius = oEditor.GetPropertyValue("Geometry3DCmdTab", obj_name, "Radius")
+        height = oEditor.GetPropertyValue("Geometry3DCmdTab", obj_name, "Height")
+        
+        # Get axis (default Z)
+        try:
+            axis = oEditor.GetPropertyValue("Geometry3DCmdTab", obj_name, "Axis")
+        except:
+            axis = "Z"
+        
+        # Get number of segments
+        try:
+            num_segments = oEditor.GetPropertyValue("Geometry3DCmdTab", obj_name, "Number of Segments")
+        except:
+            num_segments = "0"
+        
+        print("  Cylinder: " + obj_name)
+        print("    Center: " + center_pos)
+        print("    Radius: " + radius)
+        print("    Height: " + height)
+        
+        # Build command
+        lines.append("oEditor.CreateCylinder([")
+        lines.append("    \"NAME:CylinderParameters\",")
+        lines.append("    \"XCenter:=\", \"" + xcenter + "\",")
+        lines.append("    \"YCenter:=\", \"" + ycenter + "\",")
+        lines.append("    \"ZCenter:=\", \"" + zcenter + "\",")
+        lines.append("    \"Radius:=\", \"" + radius + "\",")
+        lines.append("    \"Height:=\", \"" + height + "\",")
+        lines.append("    \"WhichAxis:=\", \"" + axis + "\",")
+        lines.append("    \"NumSides:=\", \"" + str(num_segments) + "\"")
+        lines.append("], [")
+        lines.append("    \"NAME:Attributes\",")
+        lines.append("    \"Name:=\", \"" + obj_name + "\"")
+        lines.append("])")
+        
+    except Exception as e:
+        lines.append("# Error: " + str(e))
+        # Debug - show what properties we can find
+        try:
+            props = oEditor.GetProperties("Geometry3DCmdTab", obj_name)
+            lines.append("# Available properties in CmdTab: " + str(props))
+        except:
+            pass
+    
+    return lines
+
+def create_box_correct(obj_name):
+    """Create box - need to find where size properties are"""
+    
+    lines = []
+    lines.append("\n# --- Create Box: " + obj_name + " ---")
+    
+    # First, let's see what properties are available
+    tabs_to_try = ["Geometry3DCmdTab", "Geometry3DParametricTab", "BaseElementTab"]
+    
+    found_props = {}
+    
+    for tab in tabs_to_try:
+        try:
+            props = oEditor.GetProperties(tab, obj_name)
+            if props:
+                lines.append("# Properties in " + tab + ": " + str(props))
+                
+                # Try to get any size-related properties
+                for prop in props:
+                    if any(x in prop.lower() for x in ["size", "position", "dim", "width", "length", "height"]):
+                        try:
+                            val = oEditor.GetPropertyValue(tab, obj_name, prop)
+                            found_props[prop] = val
+                            lines.append("# Found: " + prop + " = " + str(val))
+                        except:
+                            pass
+        except:
+            pass
+    
+    # If we found properties, use them
+    if found_props:
+        lines.append("# TODO: Create box with found properties")
+        lines.append("# " + str(found_props))
+    else:
+        lines.append("# ERROR: Could not find size properties for box")
+    
+    return lines
+
+# Run the extraction
+extract_model_correct_properties()
+```
+
+### 3. **Alternative: Try Using GetObjectProperties**
+
+```python
+def try_get_object_properties():
+    """Try alternate methods to get properties"""
+    
+    all_objects = oEditor.GetMatchedObjectName("*")
+    
+    # Test on first few objects
+    for obj_name in all_objects[:3]:
+        print("\n=== Object: " + obj_name + " ===")
+        
+        try:
+            # Try to get the object's definition
+            # This might give us the parameters used to create it
+            obj_def = oEditor.GetObjectNameByID(oEditor.GetObjectIDByName(obj_name))
+            print("Object definition: " + str(obj_def))
+        except:
+            pass
+        
+        # Try to get construction history
+        try:
+            history = oEditor.GetConstructionHistory(obj_name)
+            print("Construction history: " + str(history))
+        except:
+            pass
+        
+        # Try parameter names specific to boxes
+        if "Box" in obj_name or "2929" in obj_name:
+            param_names = [
+                "XSize", "YSize", "ZSize",
+                "DimX", "DimY", "DimZ", 
+                "SizeX", "SizeY", "SizeZ",
+                "Width", "Height", "Depth",
+                "Length", "Width", "Height"
+            ]
+            
+            for param in param_names:
+                try:
+                    val = oEditor.GetPropertyValue("Geometry3DCmdTab", obj_name, param)
+                    print("SUCCESS: " + param + " = " + val)
+                except:
+                    pass
+
+# Try alternate methods
+try_get_object_properties()
+```
+
+### 4. **Manual Property Entry Workaround**
+
+If we can’t find the box size properties programmatically, here’s a workaround:
+
+```python
+def create_box_manual(obj_name, position, xsize, ysize, zsize):
+    """Create box with manually specified sizes"""
+    
+    lines = []
+    
+    # Parse position
+    pos_parts = position.split(",")
+    xpos = pos_parts[0].strip() if len(pos_parts) > 0 else "0mm"
+    ypos = pos_parts[1].strip() if len(pos_parts) > 1 else "0mm"
+    zpos = pos_parts[2].strip() if len(pos_parts) > 2 else "0mm"
+    
+    lines.append("oEditor.CreateBox([")
+    lines.append("    \"NAME:BoxParameters\",")
+    lines.append("    \"XPosition:=\", \"" + xpos + "\",")
+    lines.append("    \"YPosition:=\", \"" + ypos + "\",")
+    lines.append("    \"ZPosition:=\", \"" + zpos + "\",")
+    lines.append("    \"XSize:=\", \"" + xsize + "\",")
+    lines.append("    \"YSize:=\", \"" + ysize + "\",")
+    lines.append("    \"ZSize:=\", \"" + zsize + "\"")
+    lines.append("], [")
+    lines.append("    \"NAME:Attributes\",")
+    lines.append("    \"Name:=\", \"" + obj_name + "\"")
+    lines.append("])")
+    
+    return lines
+
+# For now, you could manually note the sizes from the Properties dialog
+# and create a mapping like:
+box_sizes = {
+    "L09_L09_2929": {"xsize": "183.8mil", "ysize": "174mil", "zsize": "240mil"},
+    # Add more boxes here
+}
+```
+
+The key findings:
+
+1. **Cylinders** use “Center Position”, “Radius”, “Height” - NOT XSize/YSize/ZSize
+1. **Boxes** might have their size properties in a different tab or accessed differently
+1. The properties dialog you’re showing IS displaying the values, so they exist somewhere
+
+Run the `find_box_properties()` function first to locate where the box dimensions are stored. They might be in `Geometry3DParametricTab` or another location.​​​​​​​​​​​​​​​​
