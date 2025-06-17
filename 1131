@@ -1,0 +1,382 @@
+You’re right - the script needs to capture the actual property names correctly. The errors show that ‘Position’ doesn’t exist as a property. Let me provide a more robust script that captures ALL the details including units, exact positions, and complex operations:
+
+## Complete Robust Extraction Script
+
+### 1. **First, Let’s Discover the Actual Property Names**
+
+```python
+import ScriptEnv
+ScriptEnv.Initialize("Ansoft.ElectronicsDesktop")
+oDesktop.RestoreWindow()
+oProject = oDesktop.GetActiveProject()
+oDesign = oProject.GetActiveDesign()
+oEditor = oDesign.SetActiveEditor("3D Modeler")
+
+def discover_all_properties():
+    """Discover all available properties for each object type"""
+    
+    all_objects = oEditor.GetMatchedObjectName("*")
+    
+    # Test first few objects to find property patterns
+    property_map = {}
+    
+    for obj in all_objects[:10]:  # Test first 10 objects
+        print("\n=== Discovering properties for: " + obj + " ===")
+        
+        # Try all possible tabs
+        tabs = [
+            "Geometry3DCmdTab",
+            "Geometry3DAttributeTab", 
+            "Geometry3DPolylineTab",
+            "Geometry3DParametricTab",
+            "BaseElementTab"
+        ]
+        
+        obj_props = {}
+        
+        for tab in tabs:
+            try:
+                props = oEditor.GetProperties(tab, obj)
+                if props:
+                    print("\nTab: " + tab)
+                    obj_props[tab] = []
+                    
+                    for prop in props:
+                        try:
+                            value = oEditor.GetPropertyValue(tab, obj, prop)
+                            print("  " + prop + " = " + str(value))
+                            obj_props[tab].append((prop, value))
+                        except:
+                            print("  " + prop + " = <couldn't read>")
+            except:
+                pass
+        
+        property_map[obj] = obj_props
+    
+    return property_map
+
+# Run discovery
+prop_map = discover_all_properties()
+```
+
+### 2. **Complete Extraction with Correct Property Names**
+
+```python
+def extract_complete_model_data():
+    """Extract all model data with correct property access"""
+    
+    output_file = "C:/temp/complete_filter_model.py"
+    data_file = "C:/temp/model_data.txt"
+    
+    all_objects = oEditor.GetMatchedObjectName("*")
+    
+    # First, save all raw data
+    with open(data_file, "w") as df:
+        df.write("COMPLETE MODEL DATA EXTRACTION\n")
+        df.write("==============================\n\n")
+        
+        for obj_name in all_objects:
+            df.write("\n\nOBJECT: " + obj_name + "\n")
+            df.write("-" * 50 + "\n")
+            
+            # Extract from all possible property tabs
+            tabs = ["Geometry3DCmdTab", "Geometry3DAttributeTab", "BaseElementTab"]
+            
+            for tab in tabs:
+                try:
+                    props = oEditor.GetProperties(tab, obj_name)
+                    if props:
+                        df.write("\n[" + tab + "]\n")
+                        
+                        for prop in props:
+                            try:
+                                value = oEditor.GetPropertyValue(tab, obj_name, prop)
+                                df.write(prop + " = " + str(value) + "\n")
+                            except:
+                                pass
+                except:
+                    pass
+    
+    # Now generate recreation script
+    with open(output_file, "w") as f:
+        f.write("# HFSS Complete Model Recreation\n")
+        f.write("import ScriptEnv\n")
+        f.write("ScriptEnv.Initialize('Ansoft.ElectronicsDesktop')\n")
+        f.write("oDesktop.RestoreWindow()\n")
+        f.write("oProject = oDesktop.GetActiveProject()\n")
+        f.write("oDesign = oProject.GetActiveDesign()\n")
+        f.write("oEditor = oDesign.SetActiveEditor('3D Modeler')\n\n")
+        
+        # Process each object
+        for obj_name in all_objects:
+            f.write("\n# ===== Object: " + obj_name + " =====\n")
+            
+            # Determine object type and create appropriate command
+            obj_type = determine_object_type(obj_name)
+            
+            if obj_type == "Box":
+                cmd = generate_box_command_accurate(obj_name)
+                f.write(cmd + "\n")
+            elif obj_type == "Cylinder":
+                cmd = generate_cylinder_command_accurate(obj_name)
+                f.write(cmd + "\n")
+            elif obj_type == "Polyline":
+                cmd = generate_polyline_command_accurate(obj_name)
+                f.write(cmd + "\n")
+            else:
+                f.write("# Unknown type for " + obj_name + "\n")
+    
+    print("Extraction complete!")
+    print("Data file: " + data_file)
+    print("Script file: " + output_file)
+
+def determine_object_type(obj_name):
+    """Determine what type of object this is"""
+    try:
+        # Check for box properties
+        props = oEditor.GetProperties("Geometry3DCmdTab", obj_name)
+        
+        if "XSize" in props or "DimX" in props:
+            return "Box"
+        elif "Radius" in props or "DimRadius" in props:
+            return "Cylinder"
+        elif "SegmentType" in props:
+            return "Polyline"
+        else:
+            # Check by getting command
+            try:
+                cmd = oEditor.GetObjectCommand(obj_name)
+                if "CreateBox" in cmd:
+                    return "Box"
+                elif "CreateCylinder" in cmd:
+                    return "Cylinder"
+                elif "CreatePolyline" in cmd:
+                    return "Polyline"
+            except:
+                pass
+    except:
+        pass
+    
+    return "Unknown"
+
+def generate_box_command_accurate(obj_name):
+    """Generate box with all exact parameters including units"""
+    
+    cmd = []
+    cmd.append("# Create Box: " + obj_name)
+    
+    try:
+        # Get properties - handle different possible property names
+        props = oEditor.GetProperties("Geometry3DCmdTab", obj_name)
+        
+        # Size properties might be named differently
+        xsize = None
+        ysize = None
+        zsize = None
+        
+        for prop in props:
+            prop_lower = prop.lower()
+            if "xsize" in prop_lower or "dimx" in prop_lower:
+                xsize = oEditor.GetPropertyValue("Geometry3DCmdTab", obj_name, prop)
+            elif "ysize" in prop_lower or "dimy" in prop_lower:
+                ysize = oEditor.GetPropertyValue("Geometry3DCmdTab", obj_name, prop)
+            elif "zsize" in prop_lower or "dimz" in prop_lower:
+                zsize = oEditor.GetPropertyValue("Geometry3DCmdTab", obj_name, prop)
+        
+        # Get position - might be XPosition, YPosition, ZPosition
+        xpos = "0mm"
+        ypos = "0mm" 
+        zpos = "0mm"
+        
+        for prop in props:
+            if "XPosition" in prop:
+                xpos = oEditor.GetPropertyValue("Geometry3DCmdTab", obj_name, prop)
+            elif "YPosition" in prop:
+                ypos = oEditor.GetPropertyValue("Geometry3DCmdTab", obj_name, prop)
+            elif "ZPosition" in prop:
+                zpos = oEditor.GetPropertyValue("Geometry3DCmdTab", obj_name, prop)
+        
+        # Build command with exact values including units
+        cmd.append("oEditor.CreateBox([")
+        cmd.append("    \"NAME:BoxParameters\",")
+        cmd.append("    \"XPosition:=\", \"" + str(xpos) + "\",")
+        cmd.append("    \"YPosition:=\", \"" + str(ypos) + "\",")
+        cmd.append("    \"ZPosition:=\", \"" + str(zpos) + "\",")
+        cmd.append("    \"XSize:=\", \"" + str(xsize) + "\",")
+        cmd.append("    \"YSize:=\", \"" + str(ysize) + "\",")
+        cmd.append("    \"ZSize:=\", \"" + str(zsize) + "\"")
+        cmd.append("], [")
+        cmd.append("    \"NAME:Attributes\",")
+        cmd.append("    \"Name:=\", \"" + obj_name + "\"")
+        cmd.append("])")
+        
+    except Exception as e:
+        cmd.append("# Error: " + str(e))
+        # Try alternate method
+        cmd.append("# Attempting alternate extraction...")
+        
+    return "\n".join(cmd)
+
+# Run the extraction
+extract_complete_model_data()
+```
+
+### 3. **Extract Complex Operations (Subtract, Sweep, Duplicate)**
+
+```python
+def extract_operations_from_names():
+    """Extract operations based on object naming patterns"""
+    
+    all_objects = oEditor.GetMatchedObjectName("*")
+    
+    operations = {
+        'subtractions': [],
+        'duplicates': [],
+        'sweeps': []
+    }
+    
+    # Analyze SUB_ objects
+    for obj in all_objects:
+        if obj.startswith("SUB_"):
+            # This is a subtraction result
+            operations['subtractions'].append(obj)
+            
+            # Try to determine what was subtracted
+            # SUB_Core_L02_L03 might mean Core was subtracted using L02 and L03
+            parts = obj.split("_")
+            if len(parts) >= 3:
+                blank_hint = parts[1]  # "Core"
+                tool_hint = "_".join(parts[2:])  # "L02_L03"
+                
+                print("Subtraction found: " + obj)
+                print("  Likely blank: objects containing '" + blank_hint + "'")
+                print("  Likely tools: objects containing '" + tool_hint + "'")
+    
+    # Find duplicate patterns
+    base_names = {}
+    for obj in all_objects:
+        # Look for patterns like L02_2_7_0_Top
+        if "_" in obj:
+            base = obj.split("_")[0]
+            if base not in base_names:
+                base_names[base] = []
+            base_names[base].append(obj)
+    
+    # Find groups with multiple objects (likely duplicates)
+    for base, objs in base_names.items():
+        if len(objs) > 3:  # Likely a duplicate group
+            operations['duplicates'].append({
+                'base': base,
+                'objects': objs,
+                'count': len(objs)
+            })
+    
+    return operations
+
+# Extract operations
+ops = extract_operations_from_names()
+print("\nOperations found:")
+print("Subtractions: " + str(len(ops['subtractions'])))
+print("Duplicate groups: " + str(len(ops['duplicates'])))
+```
+
+### 4. **Use HFSS Native History Export**
+
+```python
+def try_native_export():
+    """Try to use HFSS's native script recording"""
+    
+    try:
+        # This might work depending on your HFSS version
+        script_content = oEditor.GenerateHistory("All", "Python")
+        
+        with open("C:/temp/native_history.py", "w") as f:
+            f.write(script_content)
+            
+        print("Native history exported!")
+        
+    except Exception as e:
+        print("Native export failed: " + str(e))
+        
+        # Alternative: try to get individual object commands
+        all_objects = oEditor.GetMatchedObjectName("*")
+        
+        with open("C:/temp/object_commands.txt", "w") as f:
+            for obj in all_objects[:5]:  # Test first 5
+                try:
+                    # This might give you the creation command
+                    cmd = oEditor.GetObjectCommand(obj)
+                    f.write("\n# Object: " + obj + "\n")
+                    f.write(cmd + "\n")
+                except Exception as e2:
+                    f.write("# Could not get command for " + obj + ": " + str(e2) + "\n")
+
+# Try native export
+try_native_export()
+```
+
+### 5. **Manual But Accurate Extraction**
+
+If the above methods don’t capture everything, use this manual but thorough approach:
+
+```python
+def manual_thorough_extraction():
+    """Manually extract every detail"""
+    
+    output = []
+    all_objects = oEditor.GetMatchedObjectName("*")
+    
+    for obj in all_objects:
+        output.append("\n==== " + obj + " ====")
+        
+        # Try EVERYTHING
+        all_tabs = [
+            "Geometry3DCmdTab",
+            "Geometry3DAttributeTab",
+            "BaseElementTab",
+            "Geometry3DPolylineTab",
+            "Geometry3DCSTab",
+            "MeshTab"
+        ]
+        
+        for tab in all_tabs:
+            try:
+                props = oEditor.GetProperties(tab, obj)
+                if props and len(props) > 0:
+                    output.append("\n[" + tab + "]")
+                    
+                    # Get every single property
+                    for prop in props:
+                        try:
+                            val = oEditor.GetPropertyValue(tab, obj, prop)
+                            # Include the raw value with units
+                            output.append(prop + " = " + repr(val))
+                        except:
+                            output.append(prop + " = <error reading>")
+            except:
+                pass
+        
+        # Try to get bounding box
+        try:
+            bbox = oEditor.GetObjectBoundingBox(obj)
+            output.append("\nBounding Box: " + str(bbox))
+        except:
+            pass
+    
+    # Save everything
+    with open("C:/temp/complete_manual_extract.txt", "w") as f:
+        f.write("\n".join(output))
+    
+    print("Manual extraction saved to C:/temp/complete_manual_extract.txt")
+
+# Run manual extraction
+manual_thorough_extraction()
+```
+
+Run these scripts in order and let me know:
+
+1. What properties are actually found in the discovery script
+1. What’s in the complete_manual_extract.txt file
+1. If any of the native export methods work
+
+This will help us build the exact recreation script with all units and positions!​​​​​​​​​​​​​​​​
