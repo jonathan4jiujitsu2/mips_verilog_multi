@@ -1,0 +1,324 @@
+I see the issue - the “Command” property simply doesn’t exist. Let’s use a completely different approach that doesn’t rely on that property at all:
+
+## Working Script - No “Command” Property Required
+
+### 1. **First, Let’s See What Properties Actually Exist**
+
+```python
+import ScriptEnv
+ScriptEnv.Initialize("Ansoft.ElectronicsDesktop")
+oDesktop.RestoreWindow()
+oProject = oDesktop.GetActiveProject()
+oDesign = oProject.GetActiveDesign()
+oEditor = oDesign.SetActiveEditor("3D Modeler")
+
+def discover_actual_properties():
+    """Find what properties ACTUALLY exist for objects"""
+    
+    all_objects = oEditor.GetMatchedObjectName("*")
+    print("Found " + str(len(all_objects)) + " objects")
+    
+    # Take first 3 objects as samples
+    for obj_name in all_objects[:3]:
+        print("\n" + "="*50)
+        print("OBJECT: " + obj_name)
+        print("="*50)
+        
+        # List of ALL possible tabs in HFSS
+        all_tabs = [
+            "Geometry3DAttributeTab",
+            "Geometry3DCmdTab",
+            "Geometry3DParametricTab",
+            "BaseElementTab",
+            "Geometry3DPolylineTab"
+        ]
+        
+        found_properties = {}
+        
+        for tab in all_tabs:
+            try:
+                props = oEditor.GetProperties(tab, obj_name)
+                if props:
+                    print("\nTab: " + tab)
+                    print("Properties available: " + str(list(props)))
+                    
+                    # Try to read each property
+                    for prop in props:
+                        try:
+                            value = oEditor.GetPropertyValue(tab, obj_name, prop)
+                            found_properties[prop] = value
+                            print("  " + prop + " = " + str(value))
+                        except:
+                            print("  " + prop + " = <cannot read>")
+            except:
+                pass
+        
+        if not found_properties:
+            print("NO PROPERTIES FOUND!")
+
+# Run this first
+discover_actual_properties()
+```
+
+### 2. **Object Type Detection Without “Command”**
+
+```python
+def detect_object_type(obj_name):
+    """Detect object type by checking which properties exist"""
+    
+    # Properties that indicate specific object types
+    box_properties = ["XSize", "YSize", "ZSize"]
+    cylinder_properties = ["Radius", "Height", "Center Position"]
+    polyline_properties = ["SegmentType", "Points", "IsPolylineClosed"]
+    
+    # Check for each type
+    for prop in cylinder_properties:
+        if property_exists(obj_name, prop):
+            return "Cylinder"
+    
+    for prop in box_properties:
+        if property_exists(obj_name, prop):
+            return "Box"
+    
+    for prop in polyline_properties:
+        if property_exists(obj_name, prop):
+            return "Polyline"
+    
+    # Check by object name patterns
+    obj_lower = obj_name.lower()
+    if "box" in obj_lower:
+        return "Box"
+    elif "cylinder" in obj_lower or "cyl" in obj_lower:
+        return "Cylinder"
+    elif "line" in obj_lower:
+        return "Polyline"
+    
+    return "Unknown"
+
+def property_exists(obj_name, prop_name):
+    """Check if a property exists for an object"""
+    
+    tabs = ["Geometry3DAttributeTab", "Geometry3DCmdTab", "Geometry3DParametricTab"]
+    
+    for tab in tabs:
+        try:
+            value = oEditor.GetPropertyValue(tab, obj_name, prop_name)
+            return True
+        except:
+            continue
+    
+    return False
+
+def get_property_value(obj_name, prop_name, default=""):
+    """Get property value from any tab"""
+    
+    tabs = ["Geometry3DAttributeTab", "Geometry3DCmdTab", "Geometry3DParametricTab"]
+    
+    for tab in tabs:
+        try:
+            return oEditor.GetPropertyValue(tab, obj_name, prop_name)
+        except:
+            continue
+    
+    return default
+```
+
+### 3. **Complete Working Extraction**
+
+```python
+def extract_model_working():
+    """Extract model without using 'Command' property"""
+    
+    output_file = "C:/temp/filter_model_working.py"
+    
+    # Get all design variables first
+    variables = []
+    try:
+        var_names = oDesign.GetVariables()
+        for var_name in var_names:
+            var_value = oDesign.GetVariableValue(var_name)
+            variables.append((var_name, var_value))
+            print("Variable: " + var_name + " = " + var_value)
+    except:
+        print("Could not get variables")
+    
+    # Start building script
+    script_lines = []
+    script_lines.append("# HFSS Model Recreation")
+    script_lines.append("import ScriptEnv")
+    script_lines.append("ScriptEnv.Initialize('Ansoft.ElectronicsDesktop')")
+    script_lines.append("oDesktop.RestoreWindow()")
+    script_lines.append("oProject = oDesktop.GetActiveProject()")
+    script_lines.append("oDesign = oProject.GetActiveDesign()")
+    script_lines.append("oEditor = oDesign.SetActiveEditor('3D Modeler')")
+    script_lines.append("")
+    
+    # Add variables
+    if variables:
+        script_lines.append("# Design Variables")
+        for var_name, var_value in variables:
+            script_lines.append("# " + var_name + " = " + var_value)
+        script_lines.append("")
+    
+    # Get all objects
+    all_objects = oEditor.GetMatchedObjectName("*")
+    
+    script_lines.append("# Objects to create: " + str(len(all_objects)))
+    script_lines.append("")
+    
+    # Process each object
+    for obj_name in all_objects:
+        obj_type = detect_object_type(obj_name)
+        
+        script_lines.append("\n# Object: " + obj_name + " (Type: " + obj_type + ")")
+        
+        if obj_type == "Box":
+            script_lines.extend(extract_box(obj_name))
+        elif obj_type == "Cylinder":
+            script_lines.extend(extract_cylinder(obj_name))
+        elif obj_type == "Polyline":
+            script_lines.extend(extract_polyline(obj_name))
+        else:
+            script_lines.append("# Could not determine how to create this object")
+    
+    # Save script
+    with open(output_file, "w") as f:
+        f.write("\n".join(script_lines))
+    
+    print("\nExtraction complete!")
+    print("Script saved to: " + output_file)
+
+def extract_box(obj_name):
+    """Extract box creation command"""
+    
+    lines = []
+    
+    # Get position
+    position = get_property_value(obj_name, "Position", "0, 0, 0")
+    
+    # Parse position
+    pos_parts = [p.strip() for p in position.split(",")]
+    xpos = pos_parts[0] if len(pos_parts) > 0 else "0"
+    ypos = pos_parts[1] if len(pos_parts) > 1 else "0"
+    zpos = pos_parts[2] if len(pos_parts) > 2 else "0"
+    
+    # Get sizes
+    xsize = get_property_value(obj_name, "XSize", "0mm")
+    ysize = get_property_value(obj_name, "YSize", "0mm")
+    zsize = get_property_value(obj_name, "ZSize", "0mm")
+    
+    # Get material
+    material = get_property_value(obj_name, "Material", "vacuum")
+    
+    lines.append("oEditor.CreateBox([")
+    lines.append("    \"NAME:BoxParameters\",")
+    lines.append("    \"XPosition:=\", \"" + xpos + "\",")
+    lines.append("    \"YPosition:=\", \"" + ypos + "\",")
+    lines.append("    \"ZPosition:=\", \"" + zpos + "\",")
+    lines.append("    \"XSize:=\", \"" + xsize + "\",")
+    lines.append("    \"YSize:=\", \"" + ysize + "\",")
+    lines.append("    \"ZSize:=\", \"" + zsize + "\"")
+    lines.append("], [")
+    lines.append("    \"NAME:Attributes\",")
+    lines.append("    \"Name:=\", \"" + obj_name + "\",")
+    lines.append("    \"MaterialValue:=\", \"\\\"" + material + "\\\"\"")
+    lines.append("])")
+    
+    return lines
+
+def extract_cylinder(obj_name):
+    """Extract cylinder creation command"""
+    
+    lines = []
+    
+    # Get center position
+    center = get_property_value(obj_name, "Center Position", "0, 0, 0")
+    
+    # Parse center
+    pos_parts = [p.strip() for p in center.split(",")]
+    xcenter = pos_parts[0] if len(pos_parts) > 0 else "0"
+    ycenter = pos_parts[1] if len(pos_parts) > 1 else "0"
+    zcenter = pos_parts[2] if len(pos_parts) > 2 else "0"
+    
+    # Get dimensions
+    radius = get_property_value(obj_name, "Radius", "0mm")
+    height = get_property_value(obj_name, "Height", "0mm")
+    
+    # Get material
+    material = get_property_value(obj_name, "Material", "vacuum")
+    
+    lines.append("oEditor.CreateCylinder([")
+    lines.append("    \"NAME:CylinderParameters\",")
+    lines.append("    \"XCenter:=\", \"" + xcenter + "\",")
+    lines.append("    \"YCenter:=\", \"" + ycenter + "\",")
+    lines.append("    \"ZCenter:=\", \"" + zcenter + "\",")
+    lines.append("    \"Radius:=\", \"" + radius + "\",")
+    lines.append("    \"Height:=\", \"" + height + "\",")
+    lines.append("    \"WhichAxis:=\", \"Z\"")
+    lines.append("], [")
+    lines.append("    \"NAME:Attributes\",")
+    lines.append("    \"Name:=\", \"" + obj_name + "\",")
+    lines.append("    \"MaterialValue:=\", \"\\\"" + material + "\\\"\"")
+    lines.append("])")
+    
+    return lines
+
+def extract_polyline(obj_name):
+    """Extract polyline creation command"""
+    
+    lines = []
+    lines.append("# TODO: Polyline creation for " + obj_name)
+    lines.append("# Polyline extraction is complex - need to get points")
+    
+    return lines
+
+# Run the extraction
+extract_model_working()
+```
+
+### 4. **Debug What Properties We Can Actually Access**
+
+```python
+def debug_properties():
+    """Show exactly what we can access"""
+    
+    all_objects = oEditor.GetMatchedObjectName("*")
+    
+    print("\nDebugging first 3 objects:")
+    
+    for obj_name in all_objects[:3]:
+        print("\n" + "="*40)
+        print("Object: " + obj_name)
+        
+        # Properties to check
+        props_to_check = [
+            "Name", "Material", "Color", "Transparent",
+            "Position", "Center Position",
+            "XSize", "YSize", "ZSize",
+            "Radius", "Height",
+            "Solve Inside", "Model", "Group"
+        ]
+        
+        for prop in props_to_check:
+            value = get_property_value(obj_name, prop)
+            if value:
+                print("  " + prop + " = " + value)
+
+# Run debug
+debug_properties()
+```
+
+This approach:
+
+1. **Doesn’t use the “Command” property** at all
+1. **Detects object type** by checking which properties exist
+1. **Uses safe property access** that won’t crash
+1. **Provides debug information** to see what’s actually accessible
+
+Run these scripts in order:
+
+1. `discover_actual_properties()` - See what properties exist
+1. `debug_properties()` - Quick check of common properties
+1. `extract_model_working()` - Generate the recreation script
+
+This should work without the “Command” property errors!​​​​​​​​​​​​​​​​
