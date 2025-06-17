@@ -1,0 +1,316 @@
+I see the issue - the “Command” property doesn’t exist where we’re looking for it. Let me provide a more robust script that handles these errors and finds the properties correctly:
+
+## Corrected Script - Handle Missing Properties
+
+### 1. **Find Where Properties Actually Exist**
+
+```python
+import ScriptEnv
+ScriptEnv.Initialize("Ansoft.ElectronicsDesktop")
+oDesktop.RestoreWindow()
+oProject = oDesktop.GetActiveProject()
+oDesign = oProject.GetActiveDesign()
+oEditor = oDesign.SetActiveEditor("3D Modeler")
+
+def find_all_properties_systematically():
+    """Systematically find all properties for all objects"""
+    
+    all_objects = oEditor.GetMatchedObjectName("*")
+    print("Total objects found: " + str(len(all_objects)))
+    
+    # Test first few objects
+    for i, obj_name in enumerate(all_objects[:5]):
+        print("\n" + "="*60)
+        print("Object " + str(i) + ": " + obj_name)
+        print("="*60)
+        
+        # List of all possible tabs to check
+        all_tabs = [
+            "Geometry3DAttributeTab",
+            "Geometry3DCmdTab",
+            "Geometry3DParametricTab",
+            "BaseElementTab",
+            "Geometry3DPolylineTab",
+            "Geometry3DCSTab",
+            "AttributeTab",
+            "CommandTab"
+        ]
+        
+        for tab in all_tabs:
+            try:
+                props = oEditor.GetProperties(tab, obj_name)
+                if props and len(props) > 0:
+                    print("\n[" + tab + "] - Found " + str(len(props)) + " properties:")
+                    
+                    # Try to read each property
+                    for prop in props:
+                        try:
+                            val = oEditor.GetPropertyValue(tab, obj_name, prop)
+                            print("  " + prop + " = " + str(val))
+                        except Exception as e:
+                            print("  " + prop + " = ERROR: " + str(e))
+            except:
+                # Tab doesn't exist or isn't accessible
+                pass
+
+# Run this to see what's actually available
+find_all_properties_systematically()
+```
+
+### 2. **Safe Property Extraction Function**
+
+```python
+def safe_get_property(obj_name, prop_name, default_value=""):
+    """Safely get a property, trying multiple tabs"""
+    
+    tabs_to_try = [
+        "Geometry3DAttributeTab",
+        "Geometry3DCmdTab",
+        "Geometry3DParametricTab",
+        "BaseElementTab"
+    ]
+    
+    for tab in tabs_to_try:
+        try:
+            value = oEditor.GetPropertyValue(tab, obj_name, prop_name)
+            return value
+        except:
+            continue
+    
+    return default_value
+
+def get_object_type(obj_name):
+    """Determine object type by checking what properties exist"""
+    
+    # Check for cylinder properties
+    if safe_get_property(obj_name, "Radius") != "":
+        return "Cylinder"
+    
+    # Check for box properties (try various names)
+    box_props = ["XSize", "DimX", "SizeX", "Width"]
+    for prop in box_props:
+        if safe_get_property(obj_name, prop) != "":
+            return "Box"
+    
+    # Check for polyline
+    if safe_get_property(obj_name, "SegmentType") != "":
+        return "Polyline"
+    
+    # Try to infer from name
+    if "Box" in obj_name:
+        return "Box"
+    elif "Cylinder" in obj_name or "Cyl" in obj_name:
+        return "Cylinder"
+    
+    return "Unknown"
+```
+
+### 3. **Complete Extraction with Error Handling**
+
+```python
+def extract_model_safe():
+    """Extract model with proper error handling"""
+    
+    output_file = "C:/temp/filter_model_safe.py"
+    data_file = "C:/temp/model_data_safe.txt"
+    
+    script_lines = []
+    script_lines.append("# HFSS Model Recreation - Safe Version")
+    script_lines.append("import ScriptEnv")
+    script_lines.append("ScriptEnv.Initialize('Ansoft.ElectronicsDesktop')")
+    script_lines.append("oDesktop.RestoreWindow()")
+    script_lines.append("oProject = oDesktop.GetActiveProject()")
+    script_lines.append("oDesign = oProject.GetActiveDesign()")
+    script_lines.append("oEditor = oDesign.SetActiveEditor('3D Modeler')")
+    script_lines.append("")
+    
+    # Get all objects
+    all_objects = oEditor.GetMatchedObjectName("*")
+    
+    # Data collection
+    with open(data_file, "w") as df:
+        df.write("COMPLETE MODEL DATA\n")
+        df.write("==================\n\n")
+        
+        for obj_name in all_objects:
+            df.write("\nOBJECT: " + obj_name + "\n")
+            
+            # Determine object type
+            obj_type = get_object_type(obj_name)
+            df.write("Type: " + obj_type + "\n")
+            
+            if obj_type == "Cylinder":
+                # Extract cylinder properties
+                center_pos = safe_get_property(obj_name, "Center Position", "0, 0, 0")
+                radius = safe_get_property(obj_name, "Radius", "0mm")
+                height = safe_get_property(obj_name, "Height", "0mm")
+                
+                df.write("Center Position: " + center_pos + "\n")
+                df.write("Radius: " + radius + "\n")
+                df.write("Height: " + height + "\n")
+                
+                # Generate creation command
+                script_lines.extend(create_cylinder_safe(obj_name, center_pos, radius, height))
+                
+            elif obj_type == "Box":
+                # Try to get box properties with various names
+                position = safe_get_property(obj_name, "Position", "0, 0, 0")
+                
+                # Try different property names for sizes
+                xsize = safe_get_property(obj_name, "XSize")
+                if not xsize:
+                    xsize = safe_get_property(obj_name, "DimX")
+                if not xsize:
+                    xsize = safe_get_property(obj_name, "SizeX")
+                if not xsize:
+                    xsize = "0mm"  # default
+                
+                ysize = safe_get_property(obj_name, "YSize")
+                if not ysize:
+                    ysize = safe_get_property(obj_name, "DimY")
+                if not ysize:
+                    ysize = safe_get_property(obj_name, "SizeY")
+                if not ysize:
+                    ysize = "0mm"
+                
+                zsize = safe_get_property(obj_name, "ZSize")
+                if not zsize:
+                    zsize = safe_get_property(obj_name, "DimZ")
+                if not zsize:
+                    zsize = safe_get_property(obj_name, "SizeZ")
+                if not zsize:
+                    zsize = "0mm"
+                
+                df.write("Position: " + position + "\n")
+                df.write("XSize: " + xsize + "\n")
+                df.write("YSize: " + ysize + "\n")
+                df.write("ZSize: " + zsize + "\n")
+                
+                # Generate creation command
+                script_lines.extend(create_box_safe(obj_name, position, xsize, ysize, zsize))
+    
+    # Save script
+    with open(output_file, "w") as f:
+        f.write("\n".join(script_lines))
+    
+    print("Extraction complete!")
+    print("Script: " + output_file)
+    print("Data: " + data_file)
+
+def create_cylinder_safe(obj_name, center_pos, radius, height):
+    """Create cylinder with safe parameters"""
+    
+    lines = []
+    lines.append("\n# --- Cylinder: " + obj_name + " ---")
+    
+    # Parse center position
+    pos_parts = center_pos.split(",")
+    xcenter = pos_parts[0].strip() if len(pos_parts) > 0 else "0mm"
+    ycenter = pos_parts[1].strip() if len(pos_parts) > 1 else "0mm"
+    zcenter = pos_parts[2].strip() if len(pos_parts) > 2 else "0mm"
+    
+    lines.append("oEditor.CreateCylinder([")
+    lines.append("    \"NAME:CylinderParameters\",")
+    lines.append("    \"XCenter:=\", \"" + xcenter + "\",")
+    lines.append("    \"YCenter:=\", \"" + ycenter + "\",")
+    lines.append("    \"ZCenter:=\", \"" + zcenter + "\",")
+    lines.append("    \"Radius:=\", \"" + radius + "\",")
+    lines.append("    \"Height:=\", \"" + height + "\",")
+    lines.append("    \"WhichAxis:=\", \"Z\",")
+    lines.append("    \"NumSides:=\", \"0\"")
+    lines.append("], [")
+    lines.append("    \"NAME:Attributes\",")
+    lines.append("    \"Name:=\", \"" + obj_name + "\"")
+    lines.append("])")
+    
+    return lines
+
+def create_box_safe(obj_name, position, xsize, ysize, zsize):
+    """Create box with safe parameters"""
+    
+    lines = []
+    lines.append("\n# --- Box: " + obj_name + " ---")
+    
+    # Parse position
+    pos_parts = position.split(",")
+    xpos = pos_parts[0].strip() if len(pos_parts) > 0 else "0mm"
+    ypos = pos_parts[1].strip() if len(pos_parts) > 1 else "0mm"
+    zpos = pos_parts[2].strip() if len(pos_parts) > 2 else "0mm"
+    
+    lines.append("oEditor.CreateBox([")
+    lines.append("    \"NAME:BoxParameters\",")
+    lines.append("    \"XPosition:=\", \"" + xpos + "\",")
+    lines.append("    \"YPosition:=\", \"" + ypos + "\",")
+    lines.append("    \"ZPosition:=\", \"" + zpos + "\",")
+    lines.append("    \"XSize:=\", \"" + xsize + "\",")
+    lines.append("    \"YSize:=\", \"" + ysize + "\",")
+    lines.append("    \"ZSize:=\", \"" + zsize + "\"")
+    lines.append("], [")
+    lines.append("    \"NAME:Attributes\",")
+    lines.append("    \"Name:=\", \"" + obj_name + "\"")
+    lines.append("])")
+    
+    return lines
+
+# Run the safe extraction
+extract_model_safe()
+```
+
+### 4. **Alternative: Direct Property List**
+
+```python
+def list_all_available_properties():
+    """Just list what we CAN access"""
+    
+    all_objects = oEditor.GetMatchedObjectName("*")
+    
+    output_file = "C:/temp/available_properties.txt"
+    
+    with open(output_file, "w") as f:
+        for obj_name in all_objects[:10]:  # First 10 objects
+            f.write("\n" + "="*50 + "\n")
+            f.write("OBJECT: " + obj_name + "\n")
+            f.write("="*50 + "\n")
+            
+            # Just try to get ANY properties we can
+            found_any = False
+            
+            # Common property names to try
+            props_to_try = [
+                "Name", "Material", "Color", "Transparent",
+                "Position", "Center Position", 
+                "XSize", "YSize", "ZSize",
+                "Radius", "Height", "Axis",
+                "DimX", "DimY", "DimZ",
+                "SizeX", "SizeY", "SizeZ"
+            ]
+            
+            for prop in props_to_try:
+                val = safe_get_property(obj_name, prop)
+                if val:
+                    f.write(prop + ": " + val + "\n")
+                    found_any = True
+            
+            if not found_any:
+                f.write("No properties could be read\n")
+    
+    print("Available properties saved to: " + output_file)
+
+# List what we can actually access
+list_all_available_properties()
+```
+
+The key improvements:
+
+1. **Error handling** - Won’t crash on missing properties
+1. **Multiple attempts** - Tries different property names and tabs
+1. **Safe defaults** - Uses default values when properties can’t be found
+1. **Type detection** - Determines object type by what properties exist
+
+Run these scripts in order:
+
+1. `find_all_properties_systematically()` - See what’s actually available
+1. `extract_model_safe()` - Extract with error handling
+1. `list_all_available_properties()` - Simple list of accessible properties
+
+This should work despite the “Command” property errors.​​​​​​​​​​​​​​​​
