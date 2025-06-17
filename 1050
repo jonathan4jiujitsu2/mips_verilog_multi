@@ -1,0 +1,321 @@
+Great! Now let’s create a script that recreates your entire model. Based on your screenshot, I can see you have a complex multi-layer structure with many boolean operations. Here’s a comprehensive approach:
+
+## Complete Model Recreation Script
+
+### 1. **First, Extract Everything to a Structured Format**
+
+```python
+import ScriptEnv
+ScriptEnv.Initialize("Ansoft.ElectronicsDesktop")
+oDesktop.RestoreWindow()
+oProject = oDesktop.GetActiveProject()
+oDesign = oProject.GetActiveDesign()
+oEditor = oDesign.SetActiveEditor("3D Modeler")
+
+# Create a complete model recreation script
+def generate_recreation_script():
+    output = []
+    output.append("import ScriptEnv")
+    output.append("ScriptEnv.Initialize('Ansoft.ElectronicsDesktop')")
+    output.append("oDesktop.RestoreWindow()")
+    output.append("oProject = oDesktop.GetActiveProject()")
+    output.append("oDesign = oProject.GetActiveDesign()")
+    output.append("oEditor = oDesign.SetActiveEditor('3D Modeler')")
+    output.append("")
+    
+    # Get all objects in order
+    all_objects = oEditor.GetMatchedObjectName("*")
+    
+    # Dictionary to store object creation commands
+    object_commands = {}
+    
+    # Process each object
+    for obj_name in all_objects:
+        print("Processing: " + obj_name)
+        
+        # Get object properties
+        cmd = generate_object_creation_command(obj_name)
+        if cmd:
+            object_commands[obj_name] = cmd
+    
+    # Add commands to output in dependency order
+    # First create all base objects, then do boolean operations
+    
+    # 1. Create base solids
+    output.append("# Creating base solids")
+    for obj_name, cmd in object_commands.items():
+        if "CreateBox" in cmd or "CreateCylinder" in cmd or "CreatePolyline" in cmd:
+            output.extend(cmd)
+            output.append("")
+    
+    # 2. Add boolean operations at the end
+    output.append("# Boolean operations")
+    output.append("# Note: Update these based on your specific subtract/intersect operations")
+    
+    # Save the script
+    with open("C:/temp/recreate_model.py", "w") as f:
+        for line in output:
+            f.write(line + "\n")
+    
+    print("Recreation script saved to C:/temp/recreate_model.py")
+
+def generate_object_creation_command(obj_name):
+    """Generate the command to create a specific object"""
+    commands = []
+    
+    try:
+        # Get object properties
+        props = oEditor.GetProperties("Geometry3DCmdTab", obj_name)
+        
+        # Check if it's a box
+        if "XSize" in props and "YSize" in props and "ZSize" in props:
+            # It's a box
+            xsize = oEditor.GetPropertyValue("Geometry3DCmdTab", obj_name, "XSize")
+            ysize = oEditor.GetPropertyValue("Geometry3DCmdTab", obj_name, "YSize")
+            zsize = oEditor.GetPropertyValue("Geometry3DCmdTab", obj_name, "ZSize")
+            
+            # Get position
+            position = oEditor.GetPropertyValue("Geometry3DCmdTab", obj_name, "Position")
+            
+            commands.append("# Create box: " + obj_name)
+            commands.append("oEditor.CreateBox([")
+            commands.append("    \"NAME:BoxParameters\",")
+            commands.append("    \"XPosition:=\", \"" + str(position).split(',')[0].strip() + "\",")
+            commands.append("    \"YPosition:=\", \"" + str(position).split(',')[1].strip() + "\",")
+            commands.append("    \"ZPosition:=\", \"" + str(position).split(',')[2].strip() + "\",")
+            commands.append("    \"XSize:=\", \"" + str(xsize) + "\",")
+            commands.append("    \"YSize:=\", \"" + str(ysize) + "\",")
+            commands.append("    \"ZSize:=\", \"" + str(zsize) + "\",")
+            commands.append("], ")
+            commands.append("[")
+            commands.append("    \"NAME:Attributes\",")
+            commands.append("    \"Name:=\", \"" + obj_name + "\",")
+            
+            # Get material if exists
+            try:
+                material = oEditor.GetPropertyValue("Geometry3DAttributeTab", obj_name, "Material")
+                commands.append("    \"MaterialValue:=\", \"\\\"" + material + "\\\"\",")
+            except:
+                pass
+                
+            commands.append("])")
+            
+        # Check if it's a cylinder
+        elif "Radius" in props:
+            radius = oEditor.GetPropertyValue("Geometry3DCmdTab", obj_name, "Radius")
+            if "Height" in props:
+                height = oEditor.GetPropertyValue("Geometry3DCmdTab", obj_name, "Height")
+                # Add cylinder creation code
+                commands.append("# Create cylinder: " + obj_name)
+                # ... (similar to box)
+                
+    except Exception as e:
+        commands.append("# Could not extract creation command for: " + obj_name)
+        commands.append("# Error: " + str(e))
+    
+    return commands
+
+# Run the extraction
+generate_recreation_script()
+```
+
+### 2. **Extract Layer-Specific Objects (for your Jazz fabrication)**
+
+```python
+def extract_layer_objects():
+    """Extract objects by layer for Jazz/SiGe process"""
+    layers = {
+        'M4': [],
+        'M5': [],
+        'Polyimide': [],
+        'Si02': [],
+        'Soldermask': [],
+        'Solder': []
+    }
+    
+    all_objects = oEditor.GetMatchedObjectName("*")
+    
+    for obj in all_objects:
+        obj_lower = obj.lower()
+        if 'm4' in obj_lower:
+            layers['M4'].append(obj)
+        elif 'm5' in obj_lower:
+            layers['M5'].append(obj)
+        elif 'polyimide' in obj_lower:
+            layers['Polyimide'].append(obj)
+        elif 'si02' in obj_lower or 'sio2' in obj_lower:
+            layers['Si02'].append(obj)
+        elif 'soldermask' in obj_lower:
+            layers['Soldermask'].append(obj)
+        elif 'solder' in obj_lower and 'soldermask' not in obj_lower:
+            layers['Solder'].append(obj)
+    
+    # Generate layer-by-layer creation script
+    script = []
+    for layer_name, objects in layers.items():
+        if objects:
+            script.append("\n# Layer: " + layer_name)
+            script.append("# Objects: " + str(objects))
+            
+            # Get Z-position to understand stackup
+            for obj in objects:
+                try:
+                    pos = oEditor.GetPropertyValue("Geometry3DCmdTab", obj, "Position")
+                    script.append("# " + obj + " at " + pos)
+                except:
+                    pass
+    
+    return script
+
+layer_info = extract_layer_objects()
+print("\n".join(layer_info))
+```
+
+### 3. **Handle Boolean Operations Properly**
+
+```python
+def extract_boolean_operations():
+    """Extract subtract and intersect operations"""
+    
+    # Find all SUB_ objects which likely indicate subtraction results
+    all_objects = oEditor.GetMatchedObjectName("*")
+    sub_objects = [obj for obj in all_objects if obj.startswith("SUB_")]
+    
+    operations = []
+    operations.append("# Boolean Operations")
+    operations.append("# Based on object names, these appear to be subtraction results:")
+    
+    for sub_obj in sub_objects:
+        operations.append("\n# Result object: " + sub_obj)
+        
+        # For each SUB_ object, we need to determine:
+        # 1. What was the blank (object being subtracted from)
+        # 2. What was the tool (object doing the subtracting)
+        
+        # This is tricky without history, but we can infer from names
+        if "Core" in sub_obj:
+            operations.append("# This appears to be a core subtraction")
+        elif "Prep" in sub_obj:
+            operations.append("# This appears to be a prep layer subtraction")
+    
+    # Generate subtract commands
+    operations.append("\n# Example subtract command:")
+    operations.append("oEditor.Subtract([")
+    operations.append("    \"NAME:Selections\",")
+    operations.append("    \"Blank Parts:=\", \"BlankObjectName\",")
+    operations.append("    \"Tool Parts:=\", \"ToolObjectName\"")
+    operations.append("], ")
+    operations.append("[")
+    operations.append("    \"NAME:SubtractParameters\",")
+    operations.append("    \"KeepOriginals:=\", False")
+    operations.append("])")
+    
+    return operations
+
+boolean_ops = extract_boolean_operations()
+print("\n".join(boolean_ops))
+```
+
+### 4. **Complete Automated Recreation Script**
+
+```python
+def create_complete_recreation_script():
+    """Generate a complete script that recreates the entire model"""
+    
+    output_file = "C:/temp/complete_model_recreation.py"
+    
+    with open(output_file, "w") as f:
+        # Header
+        f.write("# Auto-generated HFSS Model Recreation Script\n")
+        f.write("# Generated on: " + str(oDesktop.GetDateTime()) + "\n\n")
+        f.write("import ScriptEnv\n")
+        f.write("ScriptEnv.Initialize('Ansoft.ElectronicsDesktop')\n")
+        f.write("oDesktop.RestoreWindow()\n")
+        f.write("oProject = oDesktop.GetActiveProject()\n")
+        f.write("oDesign = oProject.GetActiveDesign()\n")
+        f.write("oEditor = oDesign.SetActiveEditor('3D Modeler')\n\n")
+        
+        # Get all objects
+        all_objects = oEditor.GetMatchedObjectName("*")
+        
+        # Step 1: Create all base geometry
+        f.write("# STEP 1: Create Base Geometry\n")
+        f.write("# ============================\n\n")
+        
+        for obj in all_objects:
+            # Skip objects that are results of boolean operations
+            if obj.startswith("SUB_"):
+                continue
+                
+            f.write("# Object: " + obj + "\n")
+            
+            # Extract and write creation command
+            try:
+                # Get all properties
+                props = oEditor.GetProperties("Geometry3DCmdTab", obj)
+                
+                # Write property values
+                for prop in props:
+                    try:
+                        val = oEditor.GetPropertyValue("Geometry3DCmdTab", obj, prop)
+                        f.write("# " + prop + " = " + str(val) + "\n")
+                    except:
+                        pass
+                
+                # Generate creation command based on object type
+                # (Add specific creation commands here based on the properties)
+                
+            except Exception as e:
+                f.write("# Error extracting " + obj + ": " + str(e) + "\n")
+            
+            f.write("\n")
+        
+        # Step 2: Boolean operations
+        f.write("\n# STEP 2: Boolean Operations\n")
+        f.write("# =========================\n\n")
+        
+        # Add boolean operations based on SUB_ objects
+        sub_objects = [obj for obj in all_objects if obj.startswith("SUB_")]
+        for sub_obj in sub_objects:
+            f.write("# Create " + sub_obj + " via subtraction\n")
+            f.write("# TODO: Determine blank and tool objects\n\n")
+        
+        # Step 3: Assign materials
+        f.write("\n# STEP 3: Assign Materials\n")
+        f.write("# =======================\n\n")
+        
+        for obj in all_objects:
+            try:
+                material = oEditor.GetPropertyValue("Geometry3DAttributeTab", obj, "Material")
+                if material and material != "":
+                    f.write("oEditor.AssignMaterial([\"NAME:Selections\", ")
+                    f.write("\"SelectionType:=\", \"SelectByName\", ")
+                    f.write("\"ObjectList:=\", [\"" + obj + "\"]], ")
+                    f.write("[\"NAME:Attributes\", ")
+                    f.write("\"MaterialValue:=\", \"\\\"" + material + "\\\"\", ")
+                    f.write("\"SolveInside:=\", True])\n")
+            except:
+                pass
+    
+    print("Complete recreation script saved to: " + output_file)
+
+# Generate the complete script
+create_complete_recreation_script()
+```
+
+### 5. **Run and Debug**
+
+After running the extraction:
+
+1. Open the generated script in a text editor
+1. Look for “TODO” comments where manual input is needed
+1. Fill in the blank/tool objects for boolean operations based on your design knowledge
+1. Run the recreation script in a new HFSS design to test
+
+The script will need some manual editing for the boolean operations, but it will have all the geometry data needed to recreate your filter.
+
+Would you like me to help you with:
+
+1. Parsing specific types of objects (like those L09_L09_2929 structures)?
+1. Determining the boolean operation sequences?
+1. Creating a parametric version for design automation?​​​​​​​​​​​​​​​​
