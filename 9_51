@@ -1,0 +1,37 @@
+%--- 1. start / hook Ansys Electronics Desktop ---------------------------
+eDesktop   = actxserver('Ansoft.ElectronicsDesktop');   % CPython ↔ COM bridge
+oDesktop   = eDesktop.GetDesktop;
+oProject   = oDesktop.OpenProject('C:\Work\Filters\MyFilter.aedt');
+oDesign    = oProject.SetActiveDesign('Filter_01');     % or GetActiveDesign
+
+%--- 2. try the modern history API ---------------------------------------
+try
+    historyTxt = oDesign.GetModelHistory();
+catch
+    fprintf('GetModelHistory blocked – falling back to editor…\n');
+    oEditor   = oDesign.SetActiveEditor('3D Modeler');
+    try
+        historyTxt = oEditor.GetHistory();              % works ≥ HFSS v15
+    catch
+        % final fallback: stitch every operation one by one
+        try
+            opNames   = oEditor.GetOperationNames();
+            historyTxt = '';
+            for k = 1:numel(opNames)
+                historyTxt = [historyTxt newline ...
+                              char(oEditor.GetScriptForOp(opNames{k}))];
+            end
+        catch
+            error('Failed to retrieve model history by any method.');
+        end
+    end
+end
+
+%--- 3. write plain-text file your script can parse ----------------------
+outFile = fullfile(getenv('USERPROFILE'),'Documents',...
+                   ['FilterHistory_' datestr(now,'yyyymmdd_HHMMSS') '.txt']);
+fid = fopen(outFile,'w');
+fprintf(fid,'%s',historyTxt);
+fclose(fid);
+
+fprintf('✓ Full HFSS history written to:\n   %s\n', outFile);
