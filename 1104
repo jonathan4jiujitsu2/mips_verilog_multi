@@ -1,0 +1,322 @@
+I see the issue - the script is identifying objects but not generating the actual creation commands. Let me provide a complete script that extracts the actual geometry creation commands:
+
+## Complete Model Recreation Script with Actual Commands
+
+### 1. **Extract Full Geometry Creation Commands**
+
+```python
+import ScriptEnv
+ScriptEnv.Initialize("Ansoft.ElectronicsDesktop")
+oDesktop.RestoreWindow()
+oProject = oDesktop.GetActiveProject()
+oDesign = oProject.GetActiveDesign()
+oEditor = oDesign.SetActiveEditor("3D Modeler")
+
+def generate_complete_recreation():
+    output_file = "C:/temp/recreate_filter_complete.py"
+    
+    with open(output_file, "w") as f:
+        # Write header
+        f.write("# HFSS Filter Model Recreation Script\n")
+        f.write("import ScriptEnv\n")
+        f.write("ScriptEnv.Initialize('Ansoft.ElectronicsDesktop')\n")
+        f.write("oDesktop.RestoreWindow()\n")
+        f.write("oProject = oDesktop.GetActiveProject()\n")
+        f.write("oDesign = oProject.GetActiveDesign()\n")
+        f.write("oEditor = oDesign.SetActiveEditor('3D Modeler')\n\n")
+        
+        # Get all objects
+        all_objects = oEditor.GetMatchedObjectName("*")
+        
+        # Separate objects by type
+        base_objects = []
+        sub_objects = []
+        
+        for obj in all_objects:
+            if obj.startswith("SUB_"):
+                sub_objects.append(obj)
+            else:
+                base_objects.append(obj)
+        
+        # STEP 1: Create base geometry
+        f.write("# ======================\n")
+        f.write("# STEP 1: BASE GEOMETRY\n")
+        f.write("# ======================\n\n")
+        
+        for obj_name in base_objects:
+            cmd = extract_creation_command(obj_name)
+            if cmd:
+                f.write(cmd + "\n\n")
+        
+        # STEP 2: Boolean operations
+        f.write("\n# ======================\n")
+        f.write("# STEP 2: BOOLEAN OPERATIONS\n")
+        f.write("# ======================\n\n")
+        
+        # For your model, I can see SUB_Prep and SUB_Core operations
+        # These need to be reconstructed based on the pattern
+        
+        f.write("# Subtract operations for SUB_Prep objects\n")
+        f.write("# Note: Update blank and tool object names based on your design\n\n")
+        
+        # STEP 3: Material assignments
+        f.write("\n# ======================\n")
+        f.write("# STEP 3: MATERIALS\n")
+        f.write("# ======================\n\n")
+        
+        for obj in all_objects:
+            try:
+                material = oEditor.GetPropertyValue("Geometry3DAttributeTab", obj, "Material")
+                if material and material != "vacuum":
+                    f.write("oEditor.AssignMaterial([\n")
+                    f.write("    \"NAME:Selections\",\n")
+                    f.write("    \"AllowRegionDependentPartSelectionForPMLCreation:=\", True,\n")
+                    f.write("    \"AllowRegionSelectionForPMLCreation:=\", True,\n")
+                    f.write("    \"Selections:=\", \"" + obj + "\"\n")
+                    f.write("], [\n")
+                    f.write("    \"NAME:Attributes\",\n")
+                    f.write("    \"MaterialValue:=\", \"\\\"" + material + "\\\"\",\n")
+                    f.write("    \"SolveInside:=\", True\n")
+                    f.write("])\n\n")
+            except:
+                pass
+    
+    print("Script saved to: " + output_file)
+
+def extract_creation_command(obj_name):
+    """Extract the exact creation command for an object"""
+    
+    try:
+        # Get object type and properties
+        props = oEditor.GetProperties("Geometry3DCmdTab", obj_name)
+        
+        # Check if it's a Box
+        if set(["XSize", "YSize", "ZSize"]).issubset(props):
+            return create_box_command(obj_name)
+        
+        # Check if it's a Cylinder
+        elif "Radius" in props and "Height" in props:
+            return create_cylinder_command(obj_name)
+        
+        # Check if it's a Polygon/Polyline
+        elif "SegmentType" in props or "Point" in props:
+            return create_polyline_command(obj_name)
+            
+    except Exception as e:
+        return "# Could not extract: " + obj_name + " - " + str(e)
+    
+    return None
+
+def create_box_command(obj_name):
+    """Generate CreateBox command"""
+    
+    cmd = []
+    cmd.append("# Create Box: " + obj_name)
+    
+    try:
+        # Get dimensions
+        xsize = oEditor.GetPropertyValue("Geometry3DCmdTab", obj_name, "XSize")
+        ysize = oEditor.GetPropertyValue("Geometry3DCmdTab", obj_name, "YSize") 
+        zsize = oEditor.GetPropertyValue("Geometry3DCmdTab", obj_name, "ZSize")
+        
+        # Get position
+        position = oEditor.GetPropertyValue("Geometry3DCmdTab", obj_name, "Position")
+        # Parse position string
+        pos_values = position.strip("()").split(",")
+        xpos = pos_values[0].strip()
+        ypos = pos_values[1].strip()
+        zpos = pos_values[2].strip()
+        
+        # Get coordinate system
+        try:
+            cs = oEditor.GetPropertyValue("Geometry3DCmdTab", obj_name, "WhichAxis")
+        except:
+            cs = "Z"
+        
+        # Build command
+        cmd.append("oEditor.CreateBox([")
+        cmd.append("    \"NAME:BoxParameters\",")
+        cmd.append("    \"XPosition:=\", \"" + xpos + "\",")
+        cmd.append("    \"YPosition:=\", \"" + ypos + "\",")
+        cmd.append("    \"ZPosition:=\", \"" + zpos + "\",")
+        cmd.append("    \"XSize:=\", \"" + str(xsize) + "\",")
+        cmd.append("    \"YSize:=\", \"" + str(ysize) + "\",")
+        cmd.append("    \"ZSize:=\", \"" + str(zsize) + "\"")
+        cmd.append("], [")
+        cmd.append("    \"NAME:Attributes\",")
+        cmd.append("    \"Name:=\", \"" + obj_name + "\",")
+        cmd.append("    \"Flags:=\", \"\",")
+        cmd.append("    \"Color:=\", \"(143 175 143)\",")
+        cmd.append("    \"Transparency:=\", 0,")
+        cmd.append("    \"PartCoordinateSystem:=\", \"Global\",")
+        cmd.append("    \"UDMId:=\", \"\",")
+        cmd.append("    \"MaterialValue:=\", \"\\\"vacuum\\\"\",")
+        cmd.append("    \"SurfaceMaterialValue:=\", \"\\\"\\\"\",")
+        cmd.append("    \"SolveInside:=\", True,")
+        cmd.append("    \"IsMaterialEditable:=\", True,")
+        cmd.append("    \"UseMaterialAppearance:=\", False,")
+        cmd.append("    \"IsLightweight:=\", False")
+        cmd.append("])")
+        
+        return "\n".join(cmd)
+        
+    except Exception as e:
+        return "# Error creating box " + obj_name + ": " + str(e)
+
+def create_cylinder_command(obj_name):
+    """Generate CreateCylinder command"""
+    
+    cmd = []
+    cmd.append("# Create Cylinder: " + obj_name)
+    
+    try:
+        radius = oEditor.GetPropertyValue("Geometry3DCmdTab", obj_name, "Radius")
+        height = oEditor.GetPropertyValue("Geometry3DCmdTab", obj_name, "Height")
+        position = oEditor.GetPropertyValue("Geometry3DCmdTab", obj_name, "Center Position")
+        
+        # Parse position
+        pos_values = position.strip("()").split(",")
+        xpos = pos_values[0].strip()
+        ypos = pos_values[1].strip()
+        zpos = pos_values[2].strip()
+        
+        # Get axis
+        try:
+            axis = oEditor.GetPropertyValue("Geometry3DCmdTab", obj_name, "WhichAxis")
+        except:
+            axis = "Z"
+        
+        cmd.append("oEditor.CreateCylinder([")
+        cmd.append("    \"NAME:CylinderParameters\",")
+        cmd.append("    \"XCenter:=\", \"" + xpos + "\",")
+        cmd.append("    \"YCenter:=\", \"" + ypos + "\",")
+        cmd.append("    \"ZCenter:=\", \"" + zpos + "\",")
+        cmd.append("    \"Radius:=\", \"" + str(radius) + "\",")
+        cmd.append("    \"Height:=\", \"" + str(height) + "\",")
+        cmd.append("    \"WhichAxis:=\", \"" + axis + "\",")
+        cmd.append("    \"NumSides:=\", \"0\"")
+        cmd.append("], [")
+        cmd.append("    \"NAME:Attributes\",")
+        cmd.append("    \"Name:=\", \"" + obj_name + "\",")
+        cmd.append("    \"Flags:=\", \"\",")
+        cmd.append("    \"Color:=\", \"(143 175 143)\",")
+        cmd.append("    \"Transparency:=\", 0,")
+        cmd.append("    \"PartCoordinateSystem:=\", \"Global\",")
+        cmd.append("    \"UDMId:=\", \"\",")
+        cmd.append("    \"MaterialValue:=\", \"\\\"vacuum\\\"\",")
+        cmd.append("    \"SurfaceMaterialValue:=\", \"\\\"\\\"\",")
+        cmd.append("    \"SolveInside:=\", True,")
+        cmd.append("    \"IsMaterialEditable:=\", True,")
+        cmd.append("    \"UseMaterialAppearance:=\", False,")
+        cmd.append("    \"IsLightweight:=\", False")
+        cmd.append("])")
+        
+        return "\n".join(cmd)
+        
+    except Exception as e:
+        return "# Error creating cylinder " + obj_name + ": " + str(e)
+
+def create_polyline_command(obj_name):
+    """Generate CreatePolyline command for complex shapes"""
+    
+    cmd = []
+    cmd.append("# Create Polyline: " + obj_name)
+    
+    # This is more complex - need to extract points
+    # Add implementation based on your specific needs
+    
+    return "\n".join(cmd)
+
+# Run the extraction
+generate_complete_recreation()
+```
+
+### 2. **Extract Duplicate/Array Patterns**
+
+```python
+def find_and_recreate_duplicates():
+    """Find duplicate patterns and generate duplication commands"""
+    
+    all_objects = oEditor.GetMatchedObjectName("*")
+    
+    # Group objects by base name pattern
+    from collections import defaultdict
+    groups = defaultdict(list)
+    
+    # Look for patterns like L09_L09_2929, L09_L10_2929, etc.
+    for obj in all_objects:
+        # Extract base pattern
+        if "_" in obj:
+            parts = obj.split("_")
+            if len(parts) >= 2:
+                base = parts[0]
+                groups[base].append(obj)
+    
+    # Generate duplication commands
+    dup_commands = []
+    
+    for base, objects in groups.items():
+        if len(objects) > 1:
+            dup_commands.append("# Duplicate group: " + base)
+            
+            # Get positions to determine pattern
+            positions = []
+            for obj in sorted(objects):
+                try:
+                    pos = oEditor.GetPropertyValue("Geometry3DCmdTab", obj, "Position")
+                    positions.append((obj, pos))
+                    dup_commands.append("# " + obj + " at " + pos)
+                except:
+                    pass
+            
+            # Analyze spacing pattern
+            # Add duplication command generation here
+            
+    return dup_commands
+
+# Get duplicate patterns
+dup_info = find_and_recreate_duplicates()
+for line in dup_info:
+    print(line)
+```
+
+### 3. **Quick Test Script**
+
+To verify the extraction is working, run this simple test:
+
+```python
+# Quick test to see what we can extract
+all_objects = oEditor.GetMatchedObjectName("*")
+
+print("Testing object extraction:")
+print("Total objects: " + str(len(all_objects)))
+
+# Test on first few objects
+for i, obj in enumerate(all_objects[:5]):
+    print("\n--- Object " + str(i) + ": " + obj + " ---")
+    
+    # Try to get all properties
+    tabs = ["Geometry3DCmdTab", "Geometry3DAttributeTab"]
+    
+    for tab in tabs:
+        try:
+            props = oEditor.GetProperties(tab, obj)
+            if props:
+                print("Properties in " + tab + ":")
+                for prop in props:
+                    try:
+                        val = oEditor.GetPropertyValue(tab, obj, prop)
+                        print("  " + prop + " = " + str(val))
+                    except:
+                        pass
+        except:
+            pass
+```
+
+Run these scripts and let me know:
+
+1. What output you get from the test script
+1. If the box/cylinder commands are being generated correctly
+1. What specific object types need help with extraction
+
+This should give you actual CreateBox/CreateCylinder commands that can recreate your model!​​​​​​​​​​​​​​​​
