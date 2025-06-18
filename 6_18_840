@@ -1,0 +1,325 @@
+I see the issues from your screenshots:
+
+1. `SelectByName` doesn’t exist - wrong method name
+1. Only `Geometry3DAttributeTab` is valid
+1. We’re finding properties like Material, Color, etc., but NOT dimensions
+
+Let me provide corrected scripts:
+
+## Corrected Scripts
+
+### 1. **Fix the Selection Method**
+
+```python
+import ScriptEnv
+ScriptEnv.Initialize("Ansoft.ElectronicsDesktop")
+oDesktop.RestoreWindow()
+oProject = oDesktop.GetActiveProject()
+oDesign = oProject.GetActiveDesign()
+oEditor = oDesign.SetActiveEditor("3D Modeler")
+
+def get_dimensions_correct_method():
+    """Use correct selection methods"""
+    
+    all_objects = oEditor.GetMatchedObjectName("*")
+    
+    output_file = "C:/temp/dimensions_correct.txt"
+    
+    with open(output_file, "w") as f:
+        f.write("OBJECT DIMENSIONS\n")
+        f.write("================\n\n")
+        
+        for obj_name in all_objects[:5]:  # Test first 5
+            try:
+                # CORRECT selection method
+                oEditor.ChangeProperty(
+                    ["NAME:AllTabs",
+                     ["NAME:Geometry3DAttributeTab",
+                      ["NAME:PropServers", obj_name],
+                      ["NAME:ChangedProps",
+                       ["NAME:Model", "Value:=", True]
+                      ]
+                     ]
+                    ])
+                
+                # Try to get bounding box after selection
+                # The method might be different
+                bounds = None
+                try:
+                    bounds = oEditor.GetModelBoundingBox()
+                    f.write("Model Bounding Box: " + str(bounds) + "\n")
+                except:
+                    pass
+                
+                # Try object-specific bounds
+                try:
+                    # This might work
+                    bounds = oEditor.GetObjectBounds(obj_name)
+                    f.write(obj_name + " bounds: " + str(bounds) + "\n")
+                except:
+                    pass
+                
+                # Get face positions (might help)
+                try:
+                    face_ids = oEditor.GetFaceIDs(obj_name)
+                    if face_ids:
+                        f.write(obj_name + " has " + str(len(face_ids)) + " faces\n")
+                        # Get center of first face
+                        center = oEditor.GetFaceCenter(face_ids[0])
+                        f.write("  First face center: " + str(center) + "\n")
+                except:
+                    pass
+                
+                # Get vertices (definitely will help)
+                try:
+                    vertex_ids = oEditor.GetVertexIDsFromObject(obj_name)
+                    if vertex_ids:
+                        f.write(obj_name + " has " + str(len(vertex_ids)) + " vertices\n")
+                        # Get positions of vertices
+                        for i, vid in enumerate(vertex_ids[:4]):  # First 4 vertices
+                            pos = oEditor.GetVertexPosition(vid)
+                            f.write("  Vertex " + str(i) + ": " + str(pos) + "\n")
+                except:
+                    pass
+                
+                f.write("\n")
+                
+            except Exception as e:
+                f.write("Error with " + obj_name + ": " + str(e) + "\n\n")
+    
+    print("Results saved to: " + output_file)
+
+# Run with correct methods
+get_dimensions_correct_method()
+```
+
+### 2. **Get Dimensions from Vertices**
+
+```python
+def get_dimensions_from_vertices():
+    """Calculate dimensions from vertex positions"""
+    
+    all_objects = oEditor.GetMatchedObjectName("*")
+    
+    # Find a box object
+    box_obj = None
+    for obj in all_objects:
+        if "2929" in obj or "Box" in obj:
+            box_obj = obj
+            break
+    
+    if not box_obj:
+        print("No box object found")
+        return
+    
+    print("Analyzing: " + box_obj)
+    
+    try:
+        # Get all vertices
+        vertex_ids = oEditor.GetVertexIDsFromObject(box_obj)
+        print("Found " + str(len(vertex_ids)) + " vertices")
+        
+        if vertex_ids:
+            # Get all vertex positions
+            positions = []
+            for vid in vertex_ids:
+                try:
+                    pos = oEditor.GetVertexPosition(vid)
+                    positions.append(pos)
+                    print("Vertex " + str(vid) + ": " + str(pos))
+                except:
+                    pass
+            
+            if positions:
+                # Find min/max for each dimension
+                x_coords = [p[0] for p in positions if len(p) >= 3]
+                y_coords = [p[1] for p in positions if len(p) >= 3]
+                z_coords = [p[2] for p in positions if len(p) >= 3]
+                
+                if x_coords and y_coords and z_coords:
+                    xmin, xmax = min(x_coords), max(x_coords)
+                    ymin, ymax = min(y_coords), max(y_coords)
+                    zmin, zmax = min(z_coords), max(z_coords)
+                    
+                    print("\nCalculated dimensions:")
+                    print("X: " + str(xmin) + " to " + str(xmax) + " (size: " + str(xmax - xmin) + ")")
+                    print("Y: " + str(ymin) + " to " + str(ymax) + " (size: " + str(ymax - ymin) + ")")
+                    print("Z: " + str(zmin) + " to " + str(zmax) + " (size: " + str(zmax - zmin) + ")")
+                    
+    except Exception as e:
+        print("Error: " + str(e))
+
+# Get dimensions from vertices
+get_dimensions_from_vertices()
+```
+
+### 3. **Use History Recording**
+
+```python
+def record_object_creation():
+    """Use HFSS history to record object creation"""
+    
+    print("\n" + "="*60)
+    print("HISTORY RECORDING METHOD")
+    print("="*60)
+    print("\nTo get the exact creation commands:")
+    print("\n1. In HFSS, clear the Message Manager")
+    print("2. Select one object (e.g., L02_2_7_0_Top)")
+    print("3. Right-click > Edit > Copy")
+    print("4. Right-click in empty space > Edit > Paste")
+    print("5. Look in Message Manager - it might show the creation command")
+    print("\nOR:")
+    print("\n1. Tools > Options > General Options > Project Options")
+    print("2. Check 'Save project history'")
+    print("3. Save and reopen the project")
+    print("4. Check if history is now available")
+    
+    # Try to access history
+    try:
+        # This might work
+        history = oDesign.GetDesignHistory()
+        print("\nDesign history: " + str(history))
+    except:
+        pass
+    
+    try:
+        # Or this
+        num_history = oEditor.GetHistoryCount()
+        print("History count: " + str(num_history))
+    except:
+        pass
+
+record_object_creation()
+```
+
+### 4. **Parse Model Tree Structure**
+
+```python
+def parse_model_tree():
+    """Try to parse the model tree structure"""
+    
+    all_objects = oEditor.GetMatchedObjectName("*")
+    
+    print("\nModel Structure:")
+    print("================")
+    
+    # Group objects by type/pattern
+    groups = {}
+    
+    for obj in all_objects:
+        # Determine group
+        if obj.startswith("Layer"):
+            group = "Layers"
+        elif obj.startswith("L0") or obj.startswith("L1"):
+            group = "L-numbered objects"
+        elif obj.startswith("SUB_"):
+            group = "Subtraction results"
+        elif "BGA" in obj:
+            group = "BGA objects"
+        else:
+            group = "Other"
+        
+        if group not in groups:
+            groups[group] = []
+        groups[group].append(obj)
+    
+    # Print grouped structure
+    for group, objects in groups.items():
+        print("\n" + group + " (" + str(len(objects)) + " objects):")
+        for obj in objects[:5]:  # First 5 of each group
+            print("  - " + obj)
+        if len(objects) > 5:
+            print("  ... and " + str(len(objects) - 5) + " more")
+
+# Parse structure
+parse_model_tree()
+```
+
+### 5. **Manual Template Generator**
+
+```python
+def generate_manual_template():
+    """Generate a template for manual dimension entry"""
+    
+    all_objects = oEditor.GetMatchedObjectName("*")
+    
+    output_file = "C:/temp/manual_template.py"
+    
+    with open(output_file, "w") as f:
+        f.write("# HFSS Model Recreation - Manual Template\n")
+        f.write("# Fill in the dimensions by looking at Properties dialog in HFSS\n\n")
+        f.write("import ScriptEnv\n")
+        f.write("ScriptEnv.Initialize('Ansoft.ElectronicsDesktop')\n")
+        f.write("oDesktop.RestoreWindow()\n")
+        f.write("oProject = oDesktop.GetActiveProject()\n")
+        f.write("oDesign = oProject.GetActiveDesign()\n")
+        f.write("oEditor = oDesign.SetActiveEditor('3D Modeler')\n\n")
+        
+        # Group by likely type
+        for obj in all_objects:
+            if "Layer" not in obj and "SUB_" not in obj:  # Skip layers and subtractions
+                f.write("\n# Object: " + obj + "\n")
+                
+                # Get material
+                try:
+                    material = oEditor.GetPropertyValue("Geometry3DAttributeTab", obj, "Material")
+                except:
+                    material = "vacuum"
+                
+                if any(x in obj for x in ["2929", "L0", "L1", "Box"]):
+                    f.write("# TODO: Fill in actual dimensions from Properties dialog\n")
+                    f.write("oEditor.CreateBox([\n")
+                    f.write("    \"NAME:BoxParameters\",\n")
+                    f.write("    \"XPosition:=\", \"0mm\",  # FILL IN\n")
+                    f.write("    \"YPosition:=\", \"0mm\",  # FILL IN\n")
+                    f.write("    \"ZPosition:=\", \"0mm\",  # FILL IN\n")
+                    f.write("    \"XSize:=\", \"1mm\",  # FILL IN\n")
+                    f.write("    \"YSize:=\", \"1mm\",  # FILL IN\n")
+                    f.write("    \"ZSize:=\", \"1mm\"   # FILL IN\n")
+                    f.write("], [\n")
+                    f.write("    \"NAME:Attributes\",\n")
+                    f.write("    \"Name:=\", \"" + obj + "\",\n")
+                    f.write("    \"MaterialValue:=\", \"\\\"" + material + "\\\"\"\n")
+                    f.write("])\n")
+    
+    print("Template saved to: " + output_file)
+    print("\nNow:")
+    print("1. Open each object's Properties in HFSS")
+    print("2. Fill in the actual Position and Size values in the template")
+    print("3. Run the completed script")
+
+# Generate template
+generate_manual_template()
+```
+
+### 6. **Alternative: Use Reporter to Extract Data**
+
+```python
+def use_reporter():
+    """Try using the Reporter module"""
+    
+    try:
+        oModule = oDesign.GetModule("ReportSetup")
+        
+        # Create a report of object properties
+        oModule.CreateReport("ObjectProperties", "Modal Solution Data", "Data Table",
+            ["NAME:Context", "SimValueContext:=", [1, 0, 2, 0, False, False, -1, 1, 0, 1, 1, "", 0, 0]],
+            ["Object:=", ["All"]],
+            ["NAME:Trace", "Component:=", "Volume"])
+        
+        print("Report created - check Reports in HFSS")
+        
+    except Exception as e:
+        print("Reporter method failed: " + str(e))
+
+# Try reporter
+use_reporter()
+```
+
+Since the API isn’t exposing box dimensions directly, your best options are:
+
+1. **Use vertex positions** (#2) to calculate dimensions
+1. **Generate a manual template** (#5) and fill in dimensions from the Properties dialog
+1. **Use HFSS’s built-in recording** when you create/modify objects
+
+The vertex method should work - it will give you the exact corners of each box, from which you can calculate dimensions.​​​​​​​​​​​​​​​​
