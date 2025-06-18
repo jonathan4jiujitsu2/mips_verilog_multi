@@ -1,0 +1,126 @@
+**No, you don’t need to run that code** - it just creates a template file for manual work.
+
+Instead, let me give you a better approach to automatically extract the operations from your model:
+
+## Automatic Operation Extraction
+
+```python
+def extract_operations_from_model():
+    """Try to extract actual operations from the model"""
+    
+    output_file = "C:/temp/extracted_operations.py"
+    
+    all_objects = oEditor.GetMatchedObjectName("*")
+    
+    # Find all operation results
+    operation_results = []
+    for obj in all_objects:
+        if "SUB_" in obj:
+            operation_results.append(obj)
+    
+    lines = []
+    lines.append("# Extracted Boolean Operations")
+    lines.append("")
+    
+    # Analyze each SUB_ object to determine the operation
+    for result_obj in operation_results:
+        lines.append("\n# Operation result: " + result_obj)
+        
+        # Parse the name to guess the operation
+        # SUB_Core_L06_L07 likely means:
+        # - Subtract from Core layer
+        # - Using L06 and L07 as tools
+        
+        parts = result_obj.split("_")
+        if len(parts) >= 3:
+            operation = parts[0]  # "SUB"
+            blank = parts[1]      # "Core" or "Prep"
+            tools = "_".join(parts[2:])  # "L06_L07"
+            
+            # Find actual object names that match
+            blank_objects = []
+            tool_objects = []
+            
+            for obj in all_objects:
+                if blank in obj and "Layer" in obj:
+                    blank_objects.append(obj)
+                if any(t in obj for t in tools.split("_")):
+                    tool_objects.append(obj)
+            
+            lines.append("# Likely blank: " + str(blank_objects))
+            lines.append("# Likely tools: " + str(tool_objects))
+            
+            # Generate the subtract command
+            if blank_objects and tool_objects:
+                lines.append("oEditor.Subtract([")
+                lines.append("    \"NAME:Selections\",")
+                lines.append("    \"Blank Parts:=\", \"" + blank_objects[0] + "\",")
+                lines.append("    \"Tool Parts:=\", \"" + ",".join(tool_objects) + "\"")
+                lines.append("], [")
+                lines.append("    \"NAME:SubtractParameters\",")
+                lines.append("    \"KeepOriginals:=\", False")
+                lines.append("])")
+    
+    # Save the extracted operations
+    with open(output_file, "w") as f:
+        f.write("\n".join(lines))
+    
+    print("Extracted operations saved to: " + output_file)
+    print("\nReview and adjust the operations as needed!")
+
+# Run this to extract operations
+extract_operations_from_model()
+```
+
+## Or Use HFSS Recording (Easiest Method)
+
+The easiest way to get the exact operations:
+
+1. **In HFSS:**
+- Go to **Tools > Record Script > Start Recording**
+- Choose Python as the language
+- Click on each operation in the model tree (Subtract, Unite, etc.)
+- Right-click and select “Recreate” or “Edit”
+- Cancel the dialog (but the script will record the operation details)
+- Stop recording
+1. **The recorded script will show you:**
+- Exact object names involved
+- Correct parameter syntax
+- Proper operation order
+
+This is much more accurate than trying to guess from the model tree names.
+
+## Quick Check - Are Operations Needed?
+
+To verify if the operations are essential, you can:
+
+```python
+def check_if_operations_matter():
+    """Check if the model has the same objects before/after operations"""
+    
+    all_objects = oEditor.GetMatchedObjectName("*")
+    
+    # Count different object types
+    base_objects = 0
+    operation_results = 0
+    
+    for obj in all_objects:
+        if "SUB_" in obj or obj.startswith("Unite"):
+            operation_results += 1
+        else:
+            base_objects += 1
+    
+    print("Base objects: " + str(base_objects))
+    print("Operation results: " + str(operation_results))
+    
+    if operation_results > 0:
+        print("\nYES - Operations are essential!")
+        print("The model has " + str(operation_results) + " objects created by boolean operations")
+    else:
+        print("\nNo operation results found")
+
+# Check this
+check_if_operations_matter()
+```
+
+The operations ARE essential for your filter - they create the actual via holes, clearances, and proper layer connections.​​​​​​​​​​​​​​​​
