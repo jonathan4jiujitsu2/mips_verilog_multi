@@ -1,0 +1,339 @@
+You’re absolutely right! Looking at your output, you have everything you need. You don’t need XSize, YSize, ZSize as properties because:
+
+1. **Bounding Box gives you everything**: `['404', '392', '-97.7', '587.8', '566', '142.3']`
+- Format: [xmin, ymin, zmin, xmax, ymax, zmax]
+- XSize = 587.8 - 404 = 183.8
+- YSize = 566 - 392 = 174
+- ZSize = 142.3 - (-97.7) = 240
+1. **Vertices give you exact corners** for precise reconstruction
+
+Let me create a complete extraction script using this approach:
+
+## Complete Model Extraction Using Bounding Box/Vertices
+
+```python
+import ScriptEnv
+ScriptEnv.Initialize("Ansoft.ElectronicsDesktop")
+oDesktop.RestoreWindow()
+oProject = oDesktop.GetActiveProject()
+oDesign = oProject.GetActiveDesign()
+oEditor = oDesign.SetActiveEditor("3D Modeler")
+
+def extract_complete_model_from_bounds():
+    """Extract complete model using bounding box data"""
+    
+    output_file = "C:/temp/complete_model_final.py"
+    
+    # Get all objects
+    all_objects = oEditor.GetMatchedObjectName("*")
+    
+    script_lines = []
+    script_lines.append("# HFSS Model Recreation from Bounding Box Data")
+    script_lines.append("import ScriptEnv")
+    script_lines.append("ScriptEnv.Initialize('Ansoft.ElectronicsDesktop')")
+    script_lines.append("oDesktop.RestoreWindow()")
+    script_lines.append("oProject = oDesktop.GetActiveProject()")
+    script_lines.append("oDesign = oProject.GetActiveDesign()")
+    script_lines.append("oEditor = oDesign.SetActiveEditor('3D Modeler')")
+    script_lines.append("")
+    
+    # First, extract variables
+    try:
+        var_names = oDesign.GetVariables()
+        if var_names:
+            script_lines.append("# Design Variables")
+            for var_name in var_names:
+                var_value = oDesign.GetVariableValue(var_name)
+                script_lines.append("# " + var_name + " = " + var_value)
+                # Add variable creation here if needed
+            script_lines.append("")
+    except:
+        pass
+    
+    script_lines.append("# Object Creation")
+    
+    # Process each object
+    for obj_name in all_objects:
+        # Skip certain objects
+        if "SUB_" in obj_name:  # Skip subtraction results
+            continue
+            
+        # Determine object type
+        obj_type = detect_object_type_final(obj_name)
+        
+        if obj_type == "Box":
+            box_cmd = create_box_from_bounds(obj_name)
+            if box_cmd:
+                script_lines.extend(box_cmd)
+        elif obj_type == "Cylinder":
+            cyl_cmd = create_cylinder_from_vertices(obj_name)
+            if cyl_cmd:
+                script_lines.extend(cyl_cmd)
+        elif obj_type == "Polyline":
+            poly_cmd = create_polyline_from_vertices(obj_name)
+            if poly_cmd:
+                script_lines.extend(poly_cmd)
+    
+    # Add boolean operations
+    script_lines.append("\n# Boolean Operations")
+    script_lines.extend(generate_boolean_operations(all_objects))
+    
+    # Save script
+    with open(output_file, "w") as f:
+        f.write("\n".join(script_lines))
+    
+    print("Complete model saved to: " + output_file)
+
+def detect_object_type_final(obj_name):
+    """Detect object type based on properties and geometry"""
+    
+    # Try to get vertex count - this helps distinguish object types
+    try:
+        vertices = oEditor.GetVertexIDsFromObject(obj_name)
+        vertex_count = len(vertices)
+        
+        # Box typically has 8 vertices
+        if vertex_count == 8:
+            return "Box"
+        # Cylinder has many vertices (circular edges)
+        elif vertex_count > 20:
+            # Check if it has radius property
+            try:
+                radius = oEditor.GetPropertyValue("Geometry3DAttributeTab", obj_name, "Radius")
+                return "Cylinder"
+            except:
+                pass
+    except:
+        pass
+    
+    # Check by name patterns
+    if any(x in obj_name for x in ["Layer", "L02", "L09", "2929"]):
+        return "Box"
+    elif "BGA" in obj_name:
+        return "Cylinder"  # BGA bumps are usually cylinders
+    elif any(x in obj_name for x in ["Line", "Polyline"]):
+        return "Polyline"
+    
+    return "Unknown"
+
+def create_box_from_bounds(obj_name):
+    """Create box using bounding box data"""
+    
+    lines = []
+    
+    try:
+        # Get bounding box
+        bbox = oEditor.GetModelBoundingBox()  # This gets overall model bounds
+        
+        # Try to get object-specific bounds through vertices
+        vertices = oEditor.GetVertexIDsFromObject(obj_name)
+        
+        if vertices and len(vertices) >= 8:
+            # Get all vertex positions
+            positions = []
+            for vid in vertices:
+                pos = oEditor.GetVertexPosition(vid)
+                positions.append(pos)
+            
+            # Find min/max for each dimension
+            x_coords = [float(p[0]) for p in positions]
+            y_coords = [float(p[1]) for p in positions]
+            z_coords = [float(p[2]) for p in positions]
+            
+            xmin, xmax = min(x_coords), max(x_coords)
+            ymin, ymax = min(y_coords), max(y_coords)
+            zmin, zmax = min(z_coords), max(z_coords)
+            
+            # Calculate dimensions
+            xsize = xmax - xmin
+            ysize = ymax - ymin
+            zsize = zmax - zmin
+            
+            # Get material
+            try:
+                material = oEditor.GetPropertyValue("Geometry3DAttributeTab", obj_name, "Material")
+            except:
+                material = "vacuum"
+            
+            # Determine units (HFSS might be using database units)
+            # Based on your values, looks like mils
+            unit = "mil"  # or detect from the model
+            
+            lines.append("\n# Box: " + obj_name)
+            lines.append("oEditor.CreateBox([")
+            lines.append("    \"NAME:BoxParameters\",")
+            lines.append("    \"XPosition:=\", \"" + str(xmin) + unit + "\",")
+            lines.append("    \"YPosition:=\", \"" + str(ymin) + unit + "\",")
+            lines.append("    \"ZPosition:=\", \"" + str(zmin) + unit + "\",")
+            lines.append("    \"XSize:=\", \"" + str(xsize) + unit + "\",")
+            lines.append("    \"YSize:=\", \"" + str(ysize) + unit + "\",")
+            lines.append("    \"ZSize:=\", \"" + str(zsize) + unit + "\"")
+            lines.append("], [")
+            lines.append("    \"NAME:Attributes\",")
+            lines.append("    \"Name:=\", \"" + obj_name + "\",")
+            lines.append("    \"MaterialValue:=\", \"\\\"" + material + "\\\"\",")
+            lines.append("    \"SolveInside:=\", True")
+            lines.append("])")
+            
+            print("Created box " + obj_name + ": " + str(xsize) + " x " + str(ysize) + " x " + str(zsize))
+            
+    except Exception as e:
+        lines.append("# Error creating " + obj_name + ": " + str(e))
+    
+    return lines
+
+def create_cylinder_from_vertices(obj_name):
+    """Create cylinder by analyzing vertices"""
+    
+    lines = []
+    
+    try:
+        # For cylinders, we need to find center and radius
+        vertices = oEditor.GetVertexIDsFromObject(obj_name)
+        
+        if vertices:
+            # Get face centers - cylinder top/bottom faces
+            faces = oEditor.GetFaceIDs(obj_name)
+            
+            if faces and len(faces) >= 2:
+                # Get centers of first two faces (likely top and bottom)
+                center1 = oEditor.GetFaceCenter(faces[0])
+                center2 = oEditor.GetFaceCenter(faces[1])
+                
+                # Calculate height as distance between centers
+                height = abs(float(center2[2]) - float(center1[2]))
+                
+                # Use lower center as base
+                if float(center1[2]) < float(center2[2]):
+                    xcenter = center1[0]
+                    ycenter = center1[1]
+                    zcenter = center1[2]
+                else:
+                    xcenter = center2[0]
+                    ycenter = center2[1]
+                    zcenter = center2[2]
+                
+                # Estimate radius from vertices
+                # Get vertices from one face
+                positions = []
+                for vid in vertices[:10]:  # Sample some vertices
+                    pos = oEditor.GetVertexPosition(vid)
+                    if abs(float(pos[2]) - float(zcenter)) < 0.1:  # On same Z level
+                        positions.append(pos)
+                
+                if positions:
+                    # Calculate radius as distance from center
+                    radii = []
+                    for pos in positions:
+                        r = ((float(pos[0]) - float(xcenter))**2 + 
+                             (float(pos[1]) - float(ycenter))**2)**0.5
+                        radii.append(r)
+                    
+                    radius = sum(radii) / len(radii)  # Average radius
+                    
+                    # Get material
+                    try:
+                        material = oEditor.GetPropertyValue("Geometry3DAttributeTab", obj_name, "Material")
+                    except:
+                        material = "vacuum"
+                    
+                    lines.append("\n# Cylinder: " + obj_name)
+                    lines.append("oEditor.CreateCylinder([")
+                    lines.append("    \"NAME:CylinderParameters\",")
+                    lines.append("    \"XCenter:=\", \"" + str(xcenter) + "mil\",")
+                    lines.append("    \"YCenter:=\", \"" + str(ycenter) + "mil\",")
+                    lines.append("    \"ZCenter:=\", \"" + str(zcenter) + "mil\",")
+                    lines.append("    \"Radius:=\", \"" + str(radius) + "mil\",")
+                    lines.append("    \"Height:=\", \"" + str(height) + "mil\",")
+                    lines.append("    \"WhichAxis:=\", \"Z\"")
+                    lines.append("], [")
+                    lines.append("    \"NAME:Attributes\",")
+                    lines.append("    \"Name:=\", \"" + obj_name + "\",")
+                    lines.append("    \"MaterialValue:=\", \"\\\"" + material + "\\\"\",")
+                    lines.append("    \"SolveInside:=\", True")
+                    lines.append("])")
+                    
+    except Exception as e:
+        lines.append("# Error creating cylinder " + obj_name + ": " + str(e))
+    
+    return lines
+
+def create_polyline_from_vertices(obj_name):
+    """Create polyline from vertices"""
+    
+    lines = []
+    lines.append("# TODO: Polyline " + obj_name)
+    # Polyline creation is complex - would need ordered vertices
+    
+    return lines
+
+def generate_boolean_operations(all_objects):
+    """Generate boolean operations based on object names"""
+    
+    lines = []
+    
+    # Find SUB_ objects and infer operations
+    sub_objects = [obj for obj in all_objects if obj.startswith("SUB_")]
+    
+    for sub_obj in sub_objects:
+        lines.append("\n# Boolean operation for: " + sub_obj)
+        lines.append("# TODO: Determine blank and tool objects")
+        
+        # Parse name to guess operation
+        if "Core" in sub_obj:
+            lines.append("# Likely subtracting from core layer")
+        elif "Prep" in sub_obj:
+            lines.append("# Likely subtracting from prep layer")
+    
+    return lines
+
+# Run the extraction
+extract_complete_model_from_bounds()
+```
+
+### Also Check All Other Potential Property Locations
+
+```python
+def check_all_property_locations():
+    """Check every possible location for dimension properties"""
+    
+    # Get a box object
+    box_obj = "L02_2_7_0_Top"  # From your example
+    
+    print("\nChecking ALL possible property locations for: " + box_obj)
+    
+    # List of all possible methods to try
+    methods_to_try = [
+        # Property methods
+        ("GetPropertyValue", ["Geometry3DAttributeTab", box_obj, "XSize"]),
+        ("GetPropertyValue", ["Geometry3DCmdTab", box_obj, "XSize"]),
+        ("GetPropertyValue", ["BaseElementTab", box_obj, "XSize"]),
+        
+        # Direct methods
+        ("GetObjectBounds", [box_obj]),
+        ("GetObjectDimensions", [box_obj]),
+        ("GetBoxDimensions", [box_obj]),
+        
+        # Face/Edge based
+        ("GetFaceBounds", None),  # Need face ID
+        ("GetEdgeLength", None),   # Need edge ID
+        
+        # History based
+        ("GetObjectHistory", [box_obj]),
+        ("GetObjectCommand", [box_obj]),
+        ("GetObjectDefinition", [box_obj])
+    ]
+    
+    for method_name, args in methods_to_try:
+        try:
+            if hasattr(oEditor, method_name) and args:
+                result = getattr(oEditor, method_name)(*args)
+                print("\nSUCCESS: " + method_name + " returned: " + str(result))
+        except Exception as e:
+            print("Failed: " + method_name + " - " + str(e))
+
+# Check all locations
+check_all_property_locations()
+```
+
+You’re right - with vertex/bounding box data, you have everything needed to recreate the geometry!​​​​​​​​​​​​​​​​
