@@ -1,0 +1,263 @@
+Looking at your model tree, **YES, you absolutely need to include all those boolean operations!** They are critical to creating the final filter geometry. Without them, you’d just have a bunch of overlapping boxes and cylinders, not the actual filter structure.
+
+Here’s how to capture and recreate these operations:
+
+## Extract Boolean Operations from Model Tree
+
+```python
+def extract_all_operations():
+    """Extract the complete operation sequence including booleans"""
+    
+    output_file = "C:/temp/complete_model_with_operations.py"
+    
+    # Get all objects
+    all_objects = oEditor.GetMatchedObjectName("*")
+    
+    # Separate base objects from operation results
+    base_objects = []
+    operation_results = []
+    
+    for obj in all_objects:
+        if obj.startswith("SUB_") or obj.startswith("BGA_"):
+            operation_results.append(obj)
+        else:
+            base_objects.append(obj)
+    
+    script_lines = []
+    script_lines.append("# Complete HFSS Filter Model with Operations")
+    script_lines.append("import ScriptEnv")
+    script_lines.append("ScriptEnv.Initialize('Ansoft.ElectronicsDesktop')")
+    script_lines.append("oDesktop.RestoreWindow()")
+    script_lines.append("oProject = oDesktop.GetActiveProject()")
+    script_lines.append("oDesign = oProject.GetActiveDesign()")
+    script_lines.append("oEditor = oDesign.SetActiveEditor('3D Modeler')")
+    script_lines.append("")
+    
+    # Phase 1: Create all base objects (already done)
+    script_lines.append("# PHASE 1: BASE OBJECTS")
+    script_lines.append("# (Your existing CreateBox commands go here)")
+    script_lines.append("")
+    
+    # Phase 2: Boolean operations
+    script_lines.append("# PHASE 2: BOOLEAN OPERATIONS")
+    script_lines.extend(reconstruct_boolean_operations())
+    
+    # Phase 3: Duplications and arrays
+    script_lines.append("\n# PHASE 3: DUPLICATIONS")
+    script_lines.extend(reconstruct_duplications())
+    
+    # Save
+    with open(output_file, "w") as f:
+        f.write("\n".join(script_lines))
+    
+    print("Complete model saved to: " + output_file)
+
+def reconstruct_boolean_operations():
+    """Reconstruct boolean operations from the model"""
+    
+    lines = []
+    
+    # Based on your model tree, here's the pattern:
+    # SUB_Core_L06_L07 means: Subtract L06 and L07 from Core
+    # SUB_Prep_L05_L06 means: Subtract L05 and L06 from Prep layer
+    
+    # Example operations based on your screenshot:
+    
+    # Subtract operations for core layer
+    lines.append("\n# Core layer subtractions")
+    lines.append("oEditor.Subtract([")
+    lines.append("    \"NAME:Selections\",")
+    lines.append("    \"Blank Parts:=\", \"LayerM4_5\",  # The core layer")
+    lines.append("    \"Tool Parts:=\", \"L06_objects,L07_objects\"  # Objects to subtract")
+    lines.append("], [")
+    lines.append("    \"NAME:SubtractParameters\",")
+    lines.append("    \"KeepOriginals:=\", False")
+    lines.append("])")
+    
+    # Unite operations (from your tree)
+    lines.append("\n# Unite operations")
+    lines.append("# Unite multiple objects into single bodies")
+    lines.append("oEditor.Unite([")
+    lines.append("    \"NAME:Selections\",")
+    lines.append("    \"Selections:=\", \"object1,object2,object3\"")
+    lines.append("], [")
+    lines.append("    \"NAME:UniteParameters\",")
+    lines.append("    \"KeepOriginals:=\", False")
+    lines.append("])")
+    
+    # Intersect operations
+    lines.append("\n# Intersect operations")
+    lines.append("oEditor.Intersect([")
+    lines.append("    \"NAME:Selections\",")
+    lines.append("    \"Blank Parts:=\", \"blank_object\",")
+    lines.append("    \"Tool Parts:=\", \"tool_object\"")
+    lines.append("], [")
+    lines.append("    \"NAME:IntersectParameters\",")
+    lines.append("    \"KeepOriginals:=\", False")
+    lines.append("])")
+    
+    return lines
+
+def reconstruct_duplications():
+    """Reconstruct duplication operations"""
+    
+    lines = []
+    
+    # DuplicateBodyAlongLine (from your tree)
+    lines.append("\n# Duplicate along line operations")
+    lines.append("oEditor.DuplicateAlongLine([")
+    lines.append("    \"NAME:Selections\",")
+    lines.append("    \"Selections:=\", \"BGA_NB_0_1\",")
+    lines.append("    \"DuplicateObjects:=\", True")
+    lines.append("], [")
+    lines.append("    \"NAME:DuplicateToAlongLineParameters\",")
+    lines.append("    \"CreateNewObjects:=\", True,")
+    lines.append("    \"XComponent:=\", \"10mil\",")
+    lines.append("    \"YComponent:=\", \"0mil\",")
+    lines.append("    \"ZComponent:=\", \"0mil\",")
+    lines.append("    \"NumClones:=\", \"5\"")
+    lines.append("], [")
+    lines.append("    \"NAME:Options\",")
+    lines.append("    \"DuplicateBoundaries:=\", False")
+    lines.append("])")
+    
+    # SweepAlongVector operations
+    lines.append("\n# Sweep along vector operations")
+    lines.append("oEditor.SweepAlongVector([")
+    lines.append("    \"NAME:Selections\",")
+    lines.append("    \"Selections:=\", \"face_selection\"")
+    lines.append("], [")
+    lines.append("    \"NAME:VectorSweepParameters\",")
+    lines.append("    \"DraftAngle:=\", \"0deg\",")
+    lines.append("    \"DraftType:=\", \"Round\",")
+    lines.append("    \"CheckFaceFaceIntersection:=\", False,")
+    lines.append("    \"SweepVectorX:=\", \"0mil\",")
+    lines.append("    \"SweepVectorY:=\", \"0mil\",")
+    lines.append("    \"SweepVectorZ:=\", \"10mil\"")
+    lines.append("])")
+    
+    return lines
+```
+
+## Map Operations to Actual Objects
+
+```python
+def analyze_operation_sequence():
+    """Analyze the operation sequence to understand dependencies"""
+    
+    # This helps you understand which objects are involved in each operation
+    
+    print("\nOperation Analysis:")
+    print("==================")
+    
+    # Pattern analysis from SUB_ names
+    sub_patterns = {
+        "SUB_Core_L06_L07": {
+            "operation": "Subtract",
+            "blank": "Core layer (probably LayerM4_5)",
+            "tools": ["L06 objects", "L07 objects"]
+        },
+        "SUB_Prep_L05_L06": {
+            "operation": "Subtract", 
+            "blank": "Prep layer",
+            "tools": ["L05 objects", "L06 objects"]
+        },
+        "SUB_Core_L04_L05": {
+            "operation": "Subtract",
+            "blank": "Core layer",
+            "tools": ["L04 objects", "L05 objects"]
+        }
+    }
+    
+    for result_name, operation in sub_patterns.items():
+        print("\n" + result_name + ":")
+        print("  Operation: " + operation["operation"])
+        print("  Blank: " + operation["blank"])
+        print("  Tools: " + str(operation["tools"]))
+
+analyze_operation_sequence()
+```
+
+## Manual Recording Method (Most Accurate)
+
+Since you can see the model tree with all operations:
+
+```python
+def create_operation_recording_template():
+    """Template for manually recording operations from the model tree"""
+    
+    template = """
+# OPERATION TEMPLATE - Fill in based on HFSS model tree
+
+# 1. SUBTRACT Operations
+# Look for Subtract nodes in the tree and note:
+# - Which object is the blank (being subtracted from)
+# - Which objects are tools (doing the subtracting)
+
+oEditor.Subtract([
+    "NAME:Selections",
+    "Blank Parts:=", "FILL_IN_BLANK_OBJECT",
+    "Tool Parts:=", "FILL_IN_TOOL_OBJECTS"
+], [
+    "NAME:SubtractParameters",
+    "KeepOriginals:=", False
+])
+
+# 2. UNITE Operations
+# Look for Unite nodes and list all objects being united
+
+oEditor.Unite([
+    "NAME:Selections", 
+    "Selections:=", "object1,object2,object3"
+], [
+    "NAME:UniteParameters",
+    "KeepOriginals:=", False
+])
+
+# 3. DUPLICATE Operations
+# For each DuplicateBodyAlongLine node, note:
+# - Source object
+# - Direction vector
+# - Number of copies
+
+oEditor.DuplicateAlongLine([
+    "NAME:Selections",
+    "Selections:=", "SOURCE_OBJECT",
+    "DuplicateObjects:=", True
+], [
+    "NAME:DuplicateToAlongLineParameters",
+    "CreateNewObjects:=", True,
+    "XComponent:=", "X_DISTANCE",
+    "YComponent:=", "Y_DISTANCE", 
+    "ZComponent:=", "Z_DISTANCE",
+    "NumClones:=", "NUMBER"
+])
+"""
+    
+    with open("C:/temp/operation_template.py", "w") as f:
+        f.write(template)
+    
+    print("Template saved. Fill in based on your model tree!")
+```
+
+## Why These Operations Matter:
+
+1. **Subtract operations** - Create vias, clearances, and cavities in your filter
+1. **Unite operations** - Combine multiple objects into single conductors
+1. **Duplicate operations** - Create arrays of vias or repeated structures
+1. **Intersect operations** - Create precise overlapping regions
+
+Without these operations, you won’t have:
+
+- Via holes through layers
+- Proper clearances
+- Connected structures
+- The actual filter functionality
+
+To get the exact operations:
+
+1. Click on each operation node in the HFSS model tree
+1. Look at the properties or message log to see which objects are involved
+1. Add the corresponding operation to your script
+
+The order matters too - you need to create base objects first, then apply operations in the same sequence as shown in the model tree.​​​​​​​​​​​​​​​​
